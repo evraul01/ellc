@@ -15,7 +15,7 @@ def configuration(parent_package='', top_path=None):
   run_make()
 
   package_data = {
-    'ellk': ['data/*', 'doc/*', 'examples/*']
+    'ellc': ['data/*', 'doc/*', 'examples/*']
   }
 
   return [], package_data
@@ -28,7 +28,7 @@ class CustomBuildExt(build_ext):
 
 if __name__ == '__main__':
     setuptools.setup(
-        name='ellk',
+        name='ellc',
         version='1.8.11',
         author='Pierre Maxted',
         author_email='p.maxted@keele.ac.uk',
@@ -44,9 +44,9 @@ if __name__ == '__main__':
           'Programming Language :: Fortran'],
         install_requires=["numpy >= 1.10.0","astropy >= 1.1.1", "scipy", 
                           "emcee", "corner", "matplotlib"],
-        packages=['ellk'],
+        packages=['ellc'],
         package_data={
-            'ellk': ['data/*', 'doc/*', 'examples/*']
+            'ellc': ['data/*', 'doc/*', 'examples/*']
         },
         include_package_data=True,
         cmdclass={
