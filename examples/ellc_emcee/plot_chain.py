@@ -19,7 +19,9 @@ import numpy as np
 import corner
 import matplotlib.pyplot as plt
 from astropy.table import Table, Column
-from emcee.autocorr import function as autocorr_function
+# from emcee.autocorr import function as autocorr_function
+from emcee.autocorr import function_1d
+# from emcee.autocorr import integrated_time
 
 #------------------------------------------------------------------------------
 
@@ -35,7 +37,9 @@ def _autocorrelation_length(v):
   Finds the point where the autocorrelation function drops to e^-1
   """
   x = np.arange(len(v))
-  acf = autocorr_function(v)
+  # acf = autocorr_function(v)
+  acf = function_1d(v)
+  # acf = integrated_time(v)
   return np.argmax(x[acf > np.exp(-1)])
 
 #------------------------------------------------------------------------------
@@ -72,7 +76,7 @@ for icol,colname in enumerate(chain.colnames):
 
 burnin = np.zeros(nwalkers,dtype=int)
 for ii in range(0,nwalkers):
-  burnin[ii] = np.int(args.burn_in_factor)*np.max(acl[:,ii])
+  burnin[ii] = int(args.burn_in_factor)*np.max(acl[:,ii])
 mask = (step == 0)
 for ii in range(0,nwalkers):
   mask[walker == ii] = step[walker == ii] < burnin[ii]
