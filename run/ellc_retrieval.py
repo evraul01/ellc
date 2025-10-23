@@ -7,7 +7,7 @@ import corner
 import ellc
 from ellc import lc
 
-import run.ellc_retrieval as edm
+import edmcmc as edm
 # import batman
 
 
@@ -78,9 +78,9 @@ out = edm.edmcmc(
     wid,
     args=(time_obs, rv_data, rv_err),  # observed data
     nwalkers=15,                       # usually 2-4x number of free params
-    nlink=1000,
-    nburnin=80,
-    ncores=4                         # number of cores
+    nlink=100,
+    nburnin=90,
+    ncores=8                         # number of cores
 )
 
 print(np.median(out.flatchains[:,0]), '+/-', np.std(out.flatchains[:,0]), ';    ', np.median(out.flatchains[:,1]), '+/-', np.std(out.flatchains[:,1]))
