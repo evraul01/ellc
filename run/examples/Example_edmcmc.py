@@ -30,7 +30,7 @@ lambda1_guess = 0
 planet_name = "HD-97658-b"
 model_name = "initial"
 csvfile = "../data/HD97658_2025Feb20.csv"
-output_dir = "./edmcmc_output/"
+output_dir = "./edmcmc_output/" + planet_name + "/"
 
 df = pd.read_csv(csvfile, comment='#')
 # ensure columns exist
@@ -80,7 +80,7 @@ out = edm.edmcmc(
     nwalkers=15,                       # usually 2-4x number of free params
     nlink=10,
     nburnin=1,
-    ncores=16                         # number of cores
+    ncores=86                         # number of cores
 )
 
 print(np.median(out.flatchains[:,0]), '+/-', np.std(out.flatchains[:,0]), ';    ', np.median(out.flatchains[:,1]), '+/-', np.std(out.flatchains[:,1]))

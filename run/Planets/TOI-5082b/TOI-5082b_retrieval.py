@@ -4,40 +4,79 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import math
 import corner
+import sys
+from pathlib import Path
+
+
+def _bootstrap_paths(start_path: Path) -> None:
+    for candidate in [start_path, *start_path.parents]:
+        run_candidate = candidate if (candidate / "edmcmc.py").exists() else candidate / "run"
+        if (run_candidate / "edmcmc.py").exists():
+            repo_candidate = run_candidate.parent
+            if str(run_candidate) not in sys.path:
+                sys.path.insert(0, str(run_candidate))
+            if str(repo_candidate) not in sys.path:
+                sys.path.insert(0, str(repo_candidate))
+            return
+
+
+_bootstrap_paths(Path(__file__).resolve().parent)
+
 import ellc
 from ellc import lc
-
 import edmcmc as edm
 # import batman
 
 
 # %%
 # System parameters
-r_1 = 0.04132231404  # units of semi-major axis
-r_2 = 0.0011228161490683  # units of semi-major axis
-incl = 89.45  # degrees
-a = 24.2 # units of solar radii
-e = 0.05
+r_1 = 0.0844633938008258  # units of semi-major axis
+r_2 = 0.0021193441472191  # units of semi-major axis
+incl = 90.00  # degrees
+a = 11.01068755603 # units of solar radii
+e = 0.0
 f_c = np.sqrt(e) * math.cos(np.deg2rad(-10))
 f_s = np.sqrt(e) * math.sin(np.deg2rad(-10))
-q = 0.0000291991764706  # mass ratio
+q = 0.0000211673084961  # mass ratio
 shape_1 = "sphere"
 shape_2 = "sphere"
 sbratio = 0.0  # surface brightness ratio
-period = 9.489  # days
-t0 = 2460726.88970225  # start time
+period = 4.240122  # days
+t0 = 2460708.82692481  # start time
 
-
+vsini_guess = 1.5  # km/s
+vsini_lims = [max(0.0, vsini_guess - 0.5), vsini_guess + 9.5]  # TOI-5082b prior range
+lambda1_guess = 45  # degrees
+lambda1_lims = [lambda1_guess - 45.0, lambda1_guess + 25.0]  # TOI-5082b prior range
 
 # %%
-vsini_guess = 0.5  # km/s
-lambda1_guess = 45  # degrees
+# Model Specifications
 
-planet_name = "HD-97658b"
+planet_name = "TOI-5082b"
 model_name = "updated"
-csvfile = "../data/HD97658_2025Feb20.csv"
-output_dir = "./edmcmc_output/"
 
+nwalkers = 10  # usually 2-5x number of free params
+nlink = 10000  # number of steps
+nburnin = 500  # number of burn-in steps
+ncores = 8  # number of cores
+
+def _find_run_dir(start_path: Path) -> Path:
+    for candidate in [start_path, *start_path.parents]:
+        if (candidate / "data").is_dir() and (candidate / "edmcmc.py").exists():
+            return candidate
+        run_candidate = candidate / "run"
+        if (run_candidate / "data").is_dir() and (run_candidate / "edmcmc.py").exists():
+            return run_candidate
+    raise FileNotFoundError("Could not find the run/ directory containing data/ and edmcmc.py")
+
+
+run_dir = _find_run_dir(Path(__file__).resolve().parent)
+csvfile = run_dir / "data" / planet_name / "NEID_TOI5082_RM_Event202502.csv"
+output_dir = run_dir / "edmcmc_output" / planet_name
+output_dir.mkdir(parents=True, exist_ok=True)
+
+# %%
+# Get Data
 df = pd.read_csv(csvfile, comment='#')
 for col in ("ccfjdsum", "ccfrvmod", "dvrms"):
     if col not in df.columns:
@@ -46,6 +85,27 @@ for col in ("ccfjdsum", "ccfrvmod", "dvrms"):
 time_obs = df['ccfjdsum'].values.astype(float)  # times in days
 rv_data = df['ccfrvmod'].values.astype(float)   # observed RV in km/s
 rv_err = df['dvrms'].values.astype(float)       # RV uncertainties in km/s
+
+# Compute weighted systemic offset using out-of-transit points and subtract it
+i_rad = math.radians(incl)
+rsum = (r_1 + r_2)
+val = rsum / max(1e-12, math.sin(i_rad))
+if val >= 1.0:
+    transit_duration_days = 0.2
+else:
+    transit_duration_days = period / math.pi * val
+
+transit_half_phase = (transit_duration_days / 2.0) / period
+phases_for_mask = ((time_obs - t0) / period + 0.5) % 1.0 - 0.5
+in_transit_mask = np.abs(phases_for_mask) < transit_half_phase
+out_of_transit_mask = ~in_transit_mask
+
+if out_of_transit_mask.sum() < 3:
+    out_of_transit_mask = np.ones_like(out_of_transit_mask, dtype=bool)
+weights = 1.0 / (rv_err**2)
+gamma_weighted = np.sum(weights[out_of_transit_mask] * rv_data[out_of_transit_mask]) / np.sum(weights[out_of_transit_mask])
+
+rv_data = rv_data - gamma_weighted
 
 
 # %%
@@ -83,12 +143,12 @@ wid = [0.0001, 0.0001]         # step sizes
 parinfo = [
     {   # parameter 0: vsini (km/s)
         'fixed': False,
-        'limits': [max(0.0, vsini_guess - 0.5), vsini_guess + 1.5],  # ±0.5 km/s ()>=0)
+        'limits': vsini_lims,
         'limited': [True, True]
     },
     {   # parameter 1: lambda (degrees)
         'fixed': False,
-        'limits': [lambda1_guess - 25.0, lambda1_guess + 25.0],  # ±25 degrees
+        'limits': lambda1_lims,
         'limited': [True, True]
     },
 ]
@@ -101,10 +161,10 @@ out = edm.edmcmc(
     wid,
     args=(time_obs, rv_data, rv_err),  # observed data
     parinfo=parinfo,
-    nwalkers=10,  # usually 2-5x number of free params
-    nlink=100,  # number of steps
-    nburnin=10,  # number of burn-in steps
-    ncores=1,  # number of cores
+    nwalkers=nwalkers,  # usually 2-5x number of free params
+    nlink=nlink,  # number of steps
+    nburnin=nburnin,  # number of burn-in steps
+    ncores=ncores,  # number of cores
     quiet=True
 )
 
@@ -123,18 +183,18 @@ for i in range(ndim):
             # ax.yaxis.set_label_coords(-0.1, 0.5)
 axes1[-1].set_xlabel("Link number")
 # fig1_name = output_dir+planet_name+'_'+model_name+'_trace.pdf'
-fig1_name = planet_name+'_'+model_name+'_trace.pdf'
+fig1_name = output_dir / f"{planet_name}_{model_name}_trace.pdf"
 fig1.savefig(fig1_name)
-print('walker trace plot:'+fig1_name)
+print('walker trace plot:' + str(fig1_name))
 plt.close(fig1)
 
 # corner plot
 fig2 = plt.figure(figsize=(1+3*ndim,1+3*ndim))
 fig2 = corner.corner(out.flatchains,labels=labels)
 # fig2_name = output_dir+planet_name+'_'+model_name+'_corner.pdf'
-fig2_name = planet_name+'_'+model_name+'_corner.pdf'
+fig2_name = output_dir / f"{planet_name}_{model_name}_corner.pdf"
 fig2.savefig(fig2_name)
-print('corner plot:'+fig2_name)
+print('corner plot:' + str(fig2_name))
 plt.close(fig2)
 
 # Save best-fitting parameters to CSV
@@ -145,7 +205,7 @@ bestfits = {
 }
 
 df_best = pd.DataFrame(bestfits)
-csv_name = planet_name + '_' + model_name + '_bestfit.csv'
+csv_name = output_dir / f"{planet_name}_{model_name}_bestfit.csv"
 df_best.to_csv(csv_name, index=False)
 
 print(f"Best-fitting parameters saved to: {csv_name}")
@@ -215,8 +275,8 @@ tick_fontsize = 12       # tick label fontsize
 legend_fontsize = 12     # legend fontsize
 marker_size = 5          # data marker size
 model_linewidth = 1.5    # model line width
-band_alpha_1sig = 0.14   # alpha for 1-sigma band
-band_alpha_2sig = 0.06   # alpha for 2-sigma band
+band_alpha_1sig = 0.34   # alpha for 1-sigma band
+band_alpha_2sig = 0.16   # alpha for 2-sigma band
 # -----------------------
 
 # Top panel: 2-sigma band (lighter), 1-sigma band (slightly stronger), then best-fit line
@@ -278,8 +338,7 @@ fig3.text(0.02, 0.5, 'Radial velocity (m/s)', va='center', rotation='vertical',
 
 plt.tight_layout(rect=[0.03, 0.03, 1, 0.98])  # leave a little room on the left for the central y-label
 
-fig3_name = output_dir + planet_name + '_' + model_name + '_rv_model.pdf'
+fig3_name = output_dir / f"{planet_name}_{model_name}_rv_model.pdf"
 fig3.savefig(fig3_name)
-print('bestmodel plot:' + fig3_name)
-plt.show()
-plt.close(fig3)
+print('bestmodel plot:' + str(fig3_name))
+# 

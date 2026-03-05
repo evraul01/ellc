@@ -30,7 +30,7 @@ lambda1_guess = 0
 planet_name = "HD-97658-b"
 model_name = "initial"
 csvfile = "../data/HD97658_2025Feb20.csv"
-output_dir = "./edmcmc_output/"
+output_dir = "./edmcmc_output/" + planet_name + "/"
 
 df = pd.read_csv(csvfile, comment='#')
 # ensure columns exist

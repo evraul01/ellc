@@ -29,7 +29,7 @@ RV_TIME_COL = "ccfjdsum"
 RV_RV_COL = "ccfrvmod"
 RV_ERR_COL = "dvrms"
 
-output_dir = "./edmcmc_output/"
+output_dir = "./edmcmc_output/" + planet_name + "/"
 os.makedirs(output_dir, exist_ok=True)
 
 # Boolean: whether to phase-cut photometry to a small window around expected transit
