@@ -33,7 +33,7 @@ t0 = 2460726.88970225  # start time
 vsini_guess = 0.5  # km/s
 lambda1_guess = 45  # degrees
 
-planet_name = "HD-97658-b"
+planet_name = "HD-97658b"
 model_name = "updated"
 csvfile = "../data/HD97658_2025Feb20.csv"
 output_dir = "./edmcmc_output/"

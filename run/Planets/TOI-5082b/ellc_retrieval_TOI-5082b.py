@@ -33,7 +33,7 @@ t0 = 2460708.82692481  # start time
 vsini_guess = 1.5  # km/s
 lambda1_guess = 45  # degrees
 
-planet_name = "TOI-5082-b"
+planet_name = "TOI-5082b"
 model_name = "updated"
 csvfile = "../data/NEID_TOI5082_RM_Event202502.csv"
 output_dir = "./edmcmc_output/"
