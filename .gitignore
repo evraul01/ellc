@@ -12,5 +12,6 @@ test
 .Trashes
 pyvenv
 ./run/misc/exo_25_RM_condapack.tar.gz
-./run/edmcmc_output
 run/edmcmc_output
+run/condor*
+run/docker*
