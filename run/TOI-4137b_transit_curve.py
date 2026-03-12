@@ -38,7 +38,7 @@ import edmcmc as edm
 # TOI-4137b parameters from run/Planets/TOI-4137b/TOI-4137b_retrieval.py
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "batman_transit"
+model_name = "batman_transit_adjusted_priors"
 
 r_1 = 0.1280615074825186  # R_star / a
 r_2 = 0.01107927677378  # R_planet / a
@@ -65,35 +65,61 @@ inc_guess = incl
 # IO setup (matches retrieval output location convention)
 # ------------------------------------------------------------
 run_dir = _find_run_dir(Path(__file__).resolve().parent)
-csvfile = run_dir / "data" / planet_name / "TOI-4137b_tess_lightcurve.csv"
+csvfiles = [
+    run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0019.csv",
+    run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0026.csv",
+    run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0052.csv",
+    run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0053.csv",
+    run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0059.csv",
+    run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0073.csv",
+]
+stack_multiple_files = len(csvfiles) > 1
+plot_in_days = False  # if True, plot model/data vs time (days); if False, plot vs phase
+
+if stack_multiple_files and plot_in_days:
+    raise ValueError("When stacking multiple light-curve files, set plot_in_days=False to plot by phase.")
+
 output_dir = run_dir / "edmcmc_output" / planet_name
 output_dir.mkdir(parents=True, exist_ok=True)
 
 print(f"run_dir: {run_dir}")
-print(f"csvfile: {csvfile}")
+print(f"csvfiles: {csvfiles}")
 print(f"output_dir: {output_dir}")
 
 
 # ------------------------------------------------------------
 # Data load
 # ------------------------------------------------------------
-df = pd.read_csv(csvfile)
 required_cols = ("time", "flux", "flux_err")
-for col in required_cols:
-    if col not in df.columns:
-        raise ValueError(f"Input CSV missing required column: {col}")
+all_time = []
+all_flux = []
+all_flux_err = []
 
-mask = np.isfinite(df["time"]) & np.isfinite(df["flux"]) & np.isfinite(df["flux_err"])
-if "quality" in df.columns:
-    mask &= df["quality"].to_numpy() == 0
+for csvfile in csvfiles:
+    df = pd.read_csv(csvfile)
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Input CSV missing required column: {col} in {csvfile}")
 
-time = df.loc[mask, "time"].to_numpy(dtype=float)  # BJD - 2457000
-flux_raw = df.loc[mask, "flux"].to_numpy(dtype=float)
-flux_err_raw = df.loc[mask, "flux_err"].to_numpy(dtype=float)
+    mask = np.isfinite(df["time"]) & np.isfinite(df["flux"]) & np.isfinite(df["flux_err"])
+    if "quality" in df.columns:
+        mask &= df["quality"].to_numpy() == 0
 
-flux_med = np.nanmedian(flux_raw)
-flux = flux_raw / flux_med
-flux_err = flux_err_raw / flux_med
+    time = df.loc[mask, "time"].to_numpy(dtype=float)  # BJD - 2457000
+    flux_raw = df.loc[mask, "flux"].to_numpy(dtype=float)
+    flux_err_raw = df.loc[mask, "flux_err"].to_numpy(dtype=float)
+
+    flux_med = np.nanmedian(flux_raw)
+    flux = flux_raw / flux_med
+    flux_err = flux_err_raw / flux_med
+
+    all_time.append(time)
+    all_flux.append(flux)
+    all_flux_err.append(flux_err)
+
+time = np.concatenate(all_time)
+flux = np.concatenate(all_flux)
+flux_err = np.concatenate(all_flux_err)
 
 
 # ------------------------------------------------------------
@@ -137,15 +163,18 @@ def loglikelihood(p, x, y, e):
     return -0.5 * chi2
 
 
+# ------------------------------------------------------------
+# Priors
+# ------------------------------------------------------------
 labels = ["t0 (BJD-2457000)", "period (d)", "rp/rstar", "a/rstar", "inc (deg)"]
 p0 = [t0_guess, period_guess, rp_guess, a_over_rstar_guess, inc_guess]
 wid = [0.01, 0.001, 0.001, 0.02, 0.02]
 parinfo = [
-    {"fixed": False, "limits": [t0_guess - 0.5, t0_guess + 0.5], "limited": [True, True]},
+    {"fixed": False, "limits": [t0_guess - 0.01, t0_guess + 0.01], "limited": [True, True]},
     {"fixed": False, "limits": [period_guess - 0.1, period_guess + 0.1], "limited": [True, True]},
     {"fixed": False, "limits": [0.001, 0.3], "limited": [True, True]},
-    {"fixed": False, "limits": [1.0, 50.0], "limited": [True, True]},
-    {"fixed": False, "limits": [70.0, 90.0], "limited": [True, True]},
+    {"fixed": False, "limits": [1.0, 20.0], "limited": [True, True]},
+    {"fixed": False, "limits": [70.0, 95.0], "limited": [True, True]},
 ]
 ndim = len(p0)
 
@@ -160,8 +189,8 @@ out = edm.edmcmc(
     args=(time, flux, flux_err),
     parinfo=parinfo,
     nwalkers=200,
-    nlink=10000,
-    nburnin=500,
+    nlink=2500,
+    nburnin=250,
     ncores=12,
     quiet=True,
 )
@@ -207,11 +236,23 @@ print(f"best-fit csv: {csv_name}")
 
 best_flux = build_batman_flux(med, time)
 phase = ((time - med[0]) / med[1] + 0.5) % 1.0 - 0.5
-sort_idx = np.argsort(phase)
+sort_idx = np.argsort(phase if not plot_in_days else time)
 
 fig3, ax3 = plt.subplots(figsize=(8, 6))
+if plot_in_days:
+    x = time
+    x_model = time[sort_idx]
+    ax3.set_xlabel("Time (BJD-2457000)")
+    fig3_name = output_dir / f"{planet_name}_{model_name}_transit_model_time.pdf"
+else:
+    x = phase
+    x_model = phase[sort_idx]
+    ax3.set_xlabel("Phase")
+    ax3.set_xlim(-0.05, 0.05)
+    fig3_name = output_dir / f"{planet_name}_{model_name}_transit_model_phase.pdf"
+
 ax3.errorbar(
-    phase,
+    x,
     flux,
     yerr=flux_err,
     fmt=".",
@@ -220,15 +261,11 @@ ax3.errorbar(
     color="k",
     label="TESS data",
 )
-ax3.plot(phase[sort_idx], best_flux[sort_idx], color="red", lw=1.5, label="median model")
-ax3.set_xlabel("Phase")
+ax3.plot(x_model, best_flux[sort_idx], color="red", lw=1.5, label="median model")
 ax3.set_ylabel("Normalized Flux")
-ax3.set_xlim(-0.05, 0.05)
 ax3.legend(loc="best")
-# ax3.grid(alpha=0.25)
 fig3.tight_layout()
 
-fig3_name = output_dir / f"{planet_name}_{model_name}_transit_model.pdf"
 fig3.savefig(fig3_name)
 plt.close(fig3)
 print(f"transit model plot: {fig3_name}")
