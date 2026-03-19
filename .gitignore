@@ -15,3 +15,5 @@ pyvenv
 run/edmcmc_output
 run/condor*
 run/docker*
+*.npz
+*.pdf
