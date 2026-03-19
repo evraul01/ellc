@@ -39,7 +39,7 @@ import ellc
 # TOI-4137b system parameters (from TOI-4137b_retrieval.py)
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_lc_rv"
+model_name = "joint_lc_rv_ld"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -71,7 +71,7 @@ thin_burnin = 200
 fit_b = True
 fit_e = True
 fit_K = True
-fit_ld = False
+fit_ld = True
 
 
 # ------------------------------------------------------------
