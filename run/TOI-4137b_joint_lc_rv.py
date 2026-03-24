@@ -388,9 +388,9 @@ out = edm.edmcmc(
     wid,
     parinfo=parinfo,
     nwalkers=100,
-    nlink=500000,
+    nlink=250000,
     nburnin=10000,
-    ncores=6,
+    ncores=8,
     pos_in=pos_in,
     quiet=True,
 )
@@ -420,7 +420,7 @@ if write_chains:
 fig1, axes1 = plt.subplots(len(p0), figsize=(10, 1 + 2 * len(p0)), sharex=True)
 for i in range(len(p0)):
     ax = axes1[i]
-    ax.plot(out.whichlink, out.flatchains[:, i], ".")
+    ax.plot(out.whichlink, out.flatchains[:, i], ".", rasterized=True)
     ax.set_ylabel(labels[i])
 axes1[-1].set_xlabel("Link number")
 fig1_name = output_dir / f"{planet_name}_{model_name}_trace.pdf"
