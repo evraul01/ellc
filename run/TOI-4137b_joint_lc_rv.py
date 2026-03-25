@@ -61,6 +61,11 @@ inc_guess = incl_fixed
 vsini_guess = 10.0
 lambda_guess = 25.0
 
+fit_b = True
+fit_e = True
+fit_K = True
+fit_ld = False
+
 show_lc_sigma = True
 write_chains = True
 resume_from_chains = False
@@ -68,10 +73,8 @@ append_saved_chains = True
 thin_n = 5
 thin_burnin = 200
 
-fit_b = True
-fit_e = True
-fit_K = True
-fit_ld = False
+nlink = 100000
+ncores = 14
 
 
 # ------------------------------------------------------------
@@ -388,9 +391,9 @@ out = edm.edmcmc(
     wid,
     parinfo=parinfo,
     nwalkers=100,
-    nlink=250000,
-    nburnin=10000,
-    ncores=8,
+    nlink=nlink,
+    nburnin=int(nlink/100),
+    ncores=ncores,
     pos_in=pos_in,
     quiet=True,
 )
