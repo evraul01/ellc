@@ -1,0 +1,11 @@
+name: .exo_25_RM
+channels:
+  - defaults
+dependencies:
+  - numpy
+  - python=3.11
+  - astropy
+  - ipykernel
+  - pandas
+  - conda-pack
+prefix: /home/eraul/miniconda3/envs/.exo_25_RM

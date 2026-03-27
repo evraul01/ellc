@@ -58,7 +58,7 @@ a_over_rstar_guess = 1.0 / r_1_fixed
 t0_guess = t0_bjd_fixed
 period_guess = period_fixed
 inc_guess = incl_fixed
-vsini_guess = 10.0
+vsini_guess = 15.0
 lambda_guess = 25.0
 
 fit_b = True
@@ -68,12 +68,11 @@ fit_ld = False
 
 show_lc_sigma = True
 write_chains = True
-resume_from_chains = False
-append_saved_chains = True
+extend_chains = False
 thin_n = 5
 thin_burnin = 200
 
-nlink = 100000
+nlink = 20000
 ncores = 14
 
 
@@ -332,7 +331,7 @@ labels = [
     "a_over_rstar",
 ]
 p0 = [t0_guess, period_guess, rp_guess, a_over_rstar_guess]
-wid = [0.01, 0.001, 0.001, 0.02]
+wid = [0.001, 0.00001, 0.0001, 0.002]
 parinfo = [
     {"fixed": False, "limits": [t0_guess - 0.5, t0_guess + 0.5], "limited": [True, True]},
     {"fixed": False, "limits": [period_guess - 0.1, period_guess + 0.1], "limited": [True, True]},
@@ -379,7 +378,7 @@ if fit_ld:
         parinfo.append({"fixed": False, "limits": list(ld_u_lims[i]), "limited": [True, True]})
 
 pos_in = None
-if resume_from_chains and chains_file.exists():
+if extend_chains and chains_file.exists():
     data = np.load(chains_file)
     if "lastpos" not in data:
         raise ValueError(f"Chains file missing 'lastpos': {chains_file}")
@@ -400,7 +399,7 @@ out = edm.edmcmc(
 
 if write_chains:
     thinflatchains = out.get_chains(nthin=thin_n, nburnin=thin_burnin, flat=True)
-    if resume_from_chains and append_saved_chains and chains_file.exists():
+    if extend_chains and chains_file.exists():
         prev = np.load(chains_file)
         if "thinflatchains" in prev:
             thinflatchains = np.vstack([prev["thinflatchains"], thinflatchains])

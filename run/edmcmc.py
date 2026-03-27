@@ -397,3 +397,50 @@ def edmcmc(function, startparams_in, width_in, nwalkers=50, nlink=10000, nburnin
     return(mcmcstr(chainsout, flatchainsout, allnegloglout, flatnegloglout, whichwalkerout, 
                    whichlinkout, position, allneglogl, nburnin, nlink, nwalkers, npar, acceptancerate=naccept/ntotal))
 
+
+def load_chain_npz(path):
+    """
+    Load a saved EDMCMC chain file (npz) and return the numpy object.
+    """
+    return np.load(path, allow_pickle=True)
+
+
+def get_lastpos_from_npz(path):
+    """
+    Return the last walker positions from a saved chain file.
+    Expects 'lastpos' (saved by client code). Falls back to 'fullchains' if present.
+    """
+    data = load_chain_npz(path)
+    if "lastpos" in data:
+        return data["lastpos"]
+    if "fullchains" in data:
+        fullchains = data["fullchains"]
+        return fullchains[:, -1, :]
+    raise ValueError("Chain file missing 'lastpos' or 'fullchains'.")
+
+
+def append_thin_chains_npz(path, new_thin, labels=None, **meta):
+    """
+    Append new thinflatchains to an existing chain file.
+    """
+    data = load_chain_npz(path)
+    if "thinflatchains" in data:
+        thin = np.vstack([data["thinflatchains"], new_thin])
+    else:
+        thin = new_thin
+    payload = dict(data.items())
+    payload["thinflatchains"] = thin
+    if labels is not None:
+        payload["labels"] = np.array(labels, dtype=object)
+    payload.update(meta)
+    np.savez(path, **payload)
+
+
+def extend_edmcmc_from_npz(chain_path, function, startparams_in, width_in, **kwargs):
+    """
+    Convenience helper: resume EDMCMC from a saved chain file by using lastpos as pos_in.
+    """
+    pos_in = get_lastpos_from_npz(chain_path)
+    kwargs = dict(kwargs)
+    kwargs["pos_in"] = pos_in
+    return edmcmc(function, startparams_in, width_in, **kwargs)
