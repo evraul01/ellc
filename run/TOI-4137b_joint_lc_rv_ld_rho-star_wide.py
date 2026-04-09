@@ -40,7 +40,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_lc_rv_wide"
+model_name = "joint_lc_rv_ld_rho-star_wide"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -59,22 +59,22 @@ a_over_rstar_guess = 1.0 / r_1_fixed
 t0_guess = t0_bjd_fixed
 period_guess = period_fixed
 inc_guess = incl_fixed
-vsini_guess = 15.0
-lambda_guess = 45.0
+vsini_guess = 10.0
+lambda_guess = 30.0
 
 fit_b = True
 fit_e = True
 fit_K = True
-fit_ld = False
+fit_ld = True
 
 show_lc_sigma = True
 write_chains = True
-extend_chains = False
+extend_chains = True
 thin_n = 5
 thin_burnin = 200
 
-nlink = 100000
-ncores = 14
+nlink = 150000
+ncores = 4
 
 # %%
 # ------------------------------------------------------------
@@ -89,7 +89,7 @@ period_lims = [period_guess - 0.1, period_guess + 0.1]
 rp_lims = [0.001, 0.3]
 a_lims = [1.0, 20.0]
 
-ecc_lims = [0.0, 0.9]
+ecc_lims = [0.0, 1.0]
 sqrt_e_max = np.sqrt(ecc_lims[1])
 sqrt_e_cosw_guess = np.sqrt(ecc) * np.cos(np.deg2rad(omega))
 sqrt_e_sinw_guess = np.sqrt(ecc) * np.sin(np.deg2rad(omega))
@@ -100,18 +100,18 @@ b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
            (1.0 - ecc**2) / (1.0 + ecc * np.sin(np.deg2rad(omega))))
 b_lims = [0.0, 1.5]
 
-vsini_lims = [max(0.0, vsini_guess - 5.0), vsini_guess + 5.0]
-lambda_lims = [lambda_guess - 30.0, lambda_guess + 30.0]
+vsini_lims = [max(0.0, vsini_guess - 10.0), vsini_guess + 15.0]
+lambda_lims = [lambda_guess - 30.0, lambda_guess + 45.0]
 inc_lims = [70.0, 95.0]
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
 
-use_rho_star_prior = False
+use_rho_star_prior = True
 rho_star_mu = 2.69
 rho_star_sigma = 0.13
 
 param_config = {
-    "t0_bjd": {"guess": t0_guess, "wid": 0.01, "prior": t0_lims},
-    "period_d": {"guess": period_guess, "wid": 0.001, "prior": period_lims},
+    "t0_bjd": {"guess": t0_guess, "wid": 0.0001, "prior": t0_lims},
+    "period_d": {"guess": period_guess, "wid": 0.00001, "prior": period_lims},
     "rp_over_rstar": {"guess": rp_guess, "wid": 0.001, "prior": rp_lims},
     "a_over_rstar": {"guess": a_over_rstar_guess, "wid": 0.02, "prior": a_lims},
     "impact_b": {"guess": b_guess, "wid": 0.01, "prior": b_lims},

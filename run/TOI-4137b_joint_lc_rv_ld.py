@@ -35,8 +35,9 @@ import edmcmc as edm
 import ellc
 
 
+# %%
 # ------------------------------------------------------------
-# TOI-4137b system parameters (from TOI-4137b_retrieval.py)
+# TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
 model_name = "joint_lc_rv_ld"
@@ -72,10 +73,84 @@ extend_chains = False
 thin_n = 5
 thin_burnin = 200
 
-nlink = 250000
-ncores = 8
+nlink = 20000
+ncores = 6
+
+# %%
+# ------------------------------------------------------------
+# Prior/step configuration
+# ------------------------------------------------------------
+auto_K_from_data = True
+K_guess = 0.5
+K_lims = [0.0, 5.0]
+
+t0_lims = [t0_guess - 0.5, t0_guess + 0.5]
+period_lims = [period_guess - 0.1, period_guess + 0.1]
+rp_lims = [0.001, 0.3]
+a_lims = [1.0, 20.0]
+
+ecc_lims = [0.0, 0.9]
+sqrt_e_max = np.sqrt(ecc_lims[1])
+sqrt_e_cosw_guess = np.sqrt(ecc) * np.cos(np.deg2rad(omega))
+sqrt_e_sinw_guess = np.sqrt(ecc) * np.sin(np.deg2rad(omega))
+sqrt_e_cosw_lims = [-sqrt_e_max, sqrt_e_max]
+sqrt_e_sinw_lims = [-sqrt_e_max, sqrt_e_max]
+
+b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
+           (1.0 - ecc**2) / (1.0 + ecc * np.sin(np.deg2rad(omega))))
+b_lims = [0.0, 1.5]
+
+vsini_lims = [max(0.0, vsini_guess - 5.0), vsini_guess + 5.0]
+lambda_lims = [lambda_guess - 30.0, lambda_guess + 30.0]
+inc_lims = [70.0, 95.0]
+ld_u_lims = [(0.0, 1.0) for _ in ld_u]
+
+use_rho_star_prior = False
+rho_star_mu = 2.69
+rho_star_sigma = 0.13
+
+param_config = {
+    "t0_bjd": {"guess": t0_guess, "wid": 0.01, "prior": t0_lims},
+    "period_d": {"guess": period_guess, "wid": 0.001, "prior": period_lims},
+    "rp_over_rstar": {"guess": rp_guess, "wid": 0.001, "prior": rp_lims},
+    "a_over_rstar": {"guess": a_over_rstar_guess, "wid": 0.02, "prior": a_lims},
+    "impact_b": {"guess": b_guess, "wid": 0.01, "prior": b_lims},
+    "inc_deg": {"guess": inc_guess, "wid": 0.02, "prior": inc_lims},
+    "sqrt_e_cosw": {"guess": sqrt_e_cosw_guess, "wid": 0.05, "prior": sqrt_e_cosw_lims},
+    "sqrt_e_sinw": {"guess": sqrt_e_sinw_guess, "wid": 0.05, "prior": sqrt_e_sinw_lims},
+    "vsini": {"guess": vsini_guess, "wid": 0.2, "prior": vsini_lims},
+    "lambda": {"guess": lambda_guess, "wid": 1.0, "prior": lambda_lims},
+    "K": {"guess": K_guess, "wid": 0.05, "prior": K_lims},
+}
+
+for i, u in enumerate(ld_u):
+    param_config[f"ld_u{i+1}"] = {"guess": u, "wid": 0.05, "prior": list(ld_u_lims[i])}
 
 
+def build_param_setup():
+    names = ["t0_bjd", "period_d", "rp_over_rstar", "a_over_rstar"]
+    if fit_b:
+        names.append("impact_b")
+    else:
+        names.append("inc_deg")
+    if fit_e:
+        names += ["sqrt_e_cosw", "sqrt_e_sinw"]
+    names += ["vsini", "lambda"]
+    if fit_K:
+        names.append("K")
+    if fit_ld:
+        names += [f"ld_u{i+1}" for i in range(len(ld_u))]
+
+    p0 = [param_config[n]["guess"] for n in names]
+    wid = [param_config[n]["wid"] for n in names]
+    parinfo = [
+        {"fixed": False, "limits": param_config[n]["prior"], "limited": [True, True]}
+        for n in names
+    ]
+    return names, p0, wid, parinfo
+
+
+# %%
 # ------------------------------------------------------------
 # IO setup
 # ------------------------------------------------------------
@@ -102,6 +177,7 @@ print(f"rv_csvfile: {rv_csvfile}")
 print(f"output_dir: {output_dir}")
 
 
+# %%
 # ------------------------------------------------------------
 # Load light-curve data (stacked)
 # ------------------------------------------------------------
@@ -137,6 +213,7 @@ lc_flux = np.concatenate(all_flux)
 lc_flux_err = np.concatenate(all_flux_err)
 
 
+# %%
 # ------------------------------------------------------------
 # Load RV data (BJD)
 # ------------------------------------------------------------
@@ -150,18 +227,11 @@ rv_data = rv_df["ccfrvmod"].values.astype(float)
 rv_err = rv_df["dvrms"].values.astype(float)
 
 # Derived guesses/limits
-K_guess = 0.5 * (np.nanmax(rv_data) - np.nanmin(rv_data))
-K_lims = [0.0, max(1.0, 2.0 * K_guess)]
-
-b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
-           (1.0 - ecc**2) / (1.0 + ecc * np.sin(np.deg2rad(omega))))
-b_lims = [0.0, 1.5]
-
-vsini_lims = [max(0.0, vsini_guess - 5.0), vsini_guess + 5.0]
-lambda_lims = [lambda_guess - 30.0, lambda_guess + 30.0]
-inc_lims = [70.0, 95.0]
-ecc_lims = [0.0, 0.9]
-ld_u_lims = [(0.0, 1.0) for _ in ld_u]
+if auto_K_from_data and fit_K:
+    K_guess = 0.5 * (np.nanmax(rv_data) - np.nanmin(rv_data))
+    K_lims = [0.0, max(1.0, 2.0 * K_guess)]
+    param_config["K"]["guess"] = K_guess
+    param_config["K"]["prior"] = K_lims
 
 # Precompute weighted systemic offset using initial guess (matches your retrieval flow)
 i_rad = np.radians(incl_fixed)
@@ -184,10 +254,11 @@ gamma_weighted = np.sum(weights[out_of_transit_mask] * rv_data[out_of_transit_ma
 rv_data = rv_data - gamma_weighted
 
 
+# %%
 # ------------------------------------------------------------
 # Models
 # ------------------------------------------------------------
-def batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, ld_coeffs, time_axis):
+def batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, ld_coeffs, time_axis):
     t0_lc = t0_bjd - 2457000.0
 
     bat_params = batman.TransitParams()
@@ -197,15 +268,18 @@ def batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, ld_c
     bat_params.a = a_over_rstar
     bat_params.inc = inc_deg
     bat_params.ecc = ecc_val
-    bat_params.w = omega
+    bat_params.w = omega_val
     bat_params.u = ld_coeffs
     bat_params.limb_dark = ld_model
 
-    model = batman.TransitModel(bat_params, time_axis)
-    return model.light_curve(bat_params)
+    try:
+        model = batman.TransitModel(bat_params, time_axis)
+        return model.light_curve(bat_params)
+    except Exception:
+        return np.full_like(time_axis, np.nan)
 
 
-def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, vsini, lambda_deg, K, time_axis):
+def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K, time_axis):
     r_1 = 1.0 / a_over_rstar
     r_2 = rp_over_rstar * r_1
 
@@ -218,8 +292,8 @@ def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, vsini, 
         radius_2=r_2,
         incl=inc_deg,
         a=a_fixed,
-        f_c=np.sqrt(ecc_val) * np.cos(np.deg2rad(omega)),
-        f_s=np.sqrt(ecc_val) * np.sin(np.deg2rad(omega)),
+        f_c=np.sqrt(ecc_val) * np.cos(np.deg2rad(omega_val)),
+        f_s=np.sqrt(ecc_val) * np.sin(np.deg2rad(omega_val)),
         q=q_fixed,
         shape_1="sphere",
         shape_2="sphere",
@@ -242,6 +316,11 @@ def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, vsini, 
     return base * (K / K0)
 
 
+def rho_star_from_a_over_rstar(per_days, a_over_rstar):
+    G_cgs = 6.6743e-8
+    per_sec = per_days * 86400.0
+    return (3.0 * np.pi / (G_cgs * per_sec**2)) * (a_over_rstar**3)
+
 def unpack_params(p):
     idx = 0
     t0_bjd = p[idx]
@@ -261,10 +340,16 @@ def unpack_params(p):
         idx += 1
 
     if fit_e:
-        ecc_val = p[idx]
-        idx += 1
+        sqrt_e_cosw = p[idx]
+        sqrt_e_sinw = p[idx + 1]
+        idx += 2
+        ecc_val = sqrt_e_cosw**2 + sqrt_e_sinw**2
+        if ecc_val > 1.0:
+            return None
+        omega_val = np.degrees(np.arctan2(sqrt_e_sinw, sqrt_e_cosw))
     else:
         ecc_val = ecc
+        omega_val = omega
 
     vsini = p[idx]
     idx += 1
@@ -284,23 +369,25 @@ def unpack_params(p):
         ld_coeffs = ld_u
 
     if fit_b:
-        fac = (1.0 - ecc_val**2) / (1.0 + ecc_val * np.sin(np.deg2rad(omega)))
+        fac = (1.0 - ecc_val**2) / (1.0 + ecc_val * np.sin(np.deg2rad(omega_val)))
         if fac <= 0.0:
             return None
         cosi = b_val / (a_over_rstar * fac)
         if cosi < 0.0 or cosi > 1.0:
             return None
         inc_deg = np.degrees(np.arccos(cosi))
+    else:
+        if not (0.0 < inc_deg <= 90.0):
+            return None
 
-    return t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, vsini, lambda_deg, K_val, ld_coeffs
-
+    return t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, ld_coeffs
 
 def loglikelihood_joint(p):
     unpacked = unpack_params(p)
     if unpacked is None:
         return -np.inf
 
-    t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, vsini, lambda_deg, K_val, ld_coeffs = unpacked
+    t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, ld_coeffs = unpacked
 
     if per <= 0.0:
         return -np.inf
@@ -308,74 +395,29 @@ def loglikelihood_joint(p):
         return -np.inf
     if a_over_rstar <= 0.0:
         return -np.inf
-    if not (0.0 < inc_deg <= 90.0):
-        return -np.inf
 
-    lc_model = batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, ld_coeffs, lc_time)
-    rv_model_vals = rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, vsini, lambda_deg, K_val, rv_time)
+    lc_model = batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, ld_coeffs, lc_time)
+    if not np.all(np.isfinite(lc_model)):
+        return -np.inf
+    rv_model_vals = rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, rv_time)
     if not np.all(np.isfinite(rv_model_vals)):
         return -np.inf
 
     chi2_lc = np.sum((lc_flux - lc_model) ** 2 / lc_flux_err**2)
     chi2_rv = np.sum((rv_data - rv_model_vals) ** 2 / rv_err**2)
-    return -0.5 * (chi2_lc + chi2_rv)
+    logp = -0.5 * (chi2_lc + chi2_rv)
 
+    if use_rho_star_prior:
+        rho_star = rho_star_from_a_over_rstar(per, a_over_rstar)
+        logp += -0.5 * ((rho_star - rho_star_mu) / rho_star_sigma) ** 2
 
+    return logp
+
+# %%
 # ------------------------------------------------------------
-# Priors / MCMC
+# MCMC
 # ------------------------------------------------------------
-labels = [
-    "t0_bjd",
-    "period_d",
-    "rp_over_rstar",
-    "a_over_rstar",
-]
-p0 = [t0_guess, period_guess, rp_guess, a_over_rstar_guess]
-wid = [0.01, 0.001, 0.001, 0.02]
-parinfo = [
-    {"fixed": False, "limits": [t0_guess - 0.5, t0_guess + 0.5], "limited": [True, True]},
-    {"fixed": False, "limits": [period_guess - 0.1, period_guess + 0.1], "limited": [True, True]},
-    {"fixed": False, "limits": [0.001, 0.3], "limited": [True, True]},
-    {"fixed": False, "limits": [1.0, 20.0], "limited": [True, True]},
-]
-
-if fit_b:
-    labels.append("impact_b")
-    p0.append(b_guess)
-    wid.append(0.01)
-    parinfo.append({"fixed": False, "limits": b_lims, "limited": [True, True]})
-else:
-    labels.append("inc_deg")
-    p0.append(inc_guess)
-    wid.append(0.02)
-    parinfo.append({"fixed": False, "limits": inc_lims, "limited": [True, True]})
-
-if fit_e:
-    labels.append("ecc")
-    p0.append(ecc)
-    wid.append(0.01)
-    parinfo.append({"fixed": False, "limits": ecc_lims, "limited": [True, True]})
-
-labels += ["vsini", "lambda"]
-p0 += [vsini_guess, lambda_guess]
-wid += [0.2, 1.0]
-parinfo += [
-    {"fixed": False, "limits": vsini_lims, "limited": [True, True]},
-    {"fixed": False, "limits": lambda_lims, "limited": [True, True]},
-]
-
-if fit_K:
-    labels.append("K")
-    p0.append(K_guess)
-    wid.append(0.05)
-    parinfo.append({"fixed": False, "limits": K_lims, "limited": [True, True]})
-
-if fit_ld:
-    for i, u in enumerate(ld_u):
-        labels.append(f"ld_u{i+1}")
-        p0.append(u)
-        wid.append(0.05)
-        parinfo.append({"fixed": False, "limits": list(ld_u_lims[i]), "limited": [True, True]})
+labels, p0, wid, parinfo = build_param_setup()
 
 pos_in = None
 if extend_chains and chains_file.exists():
@@ -416,8 +458,82 @@ if write_chains:
     print(f"chains saved: {chains_file}")
 
 
+# %%
 # ------------------------------------------------------------
-# Diagnostics
+# Results.txt Function
+# ------------------------------------------------------------
+def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files, rv_file, ncores, fit_flags):
+    header = [
+        "***************************************",
+        "#######################################",
+        "######                           ######",
+        "###### TOI-4137b Retrieval Output ######",
+        "######                           ######",
+        "#######################################",
+        "***************************************",
+        "",
+        "#################################",
+        f"PLANET: {planet_name}",
+        f"Model: {model_name}",
+        "#################################",
+        "",
+        "Datasets:",
+    ]
+
+    header += [f"-> LC: {Path(f).name}" for f in lc_files]
+    header += [f"-> RV: {Path(rv_file).name}"]
+
+    header += [
+        "",
+        "#################################",
+        "Algorithm = EDMCMC",
+        f"N_params = {len(labels)}",
+        f"N_walkers = {out.nwalkers}",
+        f"N_link = {out.nlink}",
+        f"N_burnin = {out.nburnin}",
+        f"N_cores = {ncores}",
+        "",
+        "Model flags:",
+        f"-> fit_b = {fit_flags['fit_b']}",
+        f"-> fit_e = {fit_flags['fit_e']}",
+        f"-> fit_K = {fit_flags['fit_K']}",
+        f"-> fit_ld = {fit_flags['fit_ld']}",
+        "",
+        "#################################",
+        "Gelman-Rubin statistics:",
+    ]
+
+    gr = out.gelmanrubin()
+    for i in range(len(gr)):
+        header.append(f"Parameter {i+1} ({labels[i]}) has a Gelman-Rubin statistic of {gr[i]}")
+
+    def write_sigma_block(fh, title, p_lo, p_hi):
+        fh.write("\n******************************************\n")
+        fh.write(f"{title} constraints\n")
+        fh.write("******************************************\n")
+        for i, name in enumerate(labels):
+            s = samples[:, i]
+            med = float(np.nanmedian(s))
+            lo = float(np.nanpercentile(s, p_lo))
+            hi = float(np.nanpercentile(s, p_hi))
+            fh.write(f"{name:<15} = {med: .6g} (+{hi - med:.6g}) (-{med - lo:.6g})\n")
+
+    with open(path, "w") as f:
+        f.write("\n".join(header))
+        write_sigma_block(f, "1 σ", 15.865, 84.135)
+        write_sigma_block(f, "2 σ", 2.5, 97.5)
+        write_sigma_block(f, "3 σ", 0.135, 99.865)
+        write_sigma_block(f, "5 σ", 0.000057, 99.999943)
+
+        f.write("\n******************************************\n")
+        f.write("Best-fitting parameters\n")
+        f.write("******************************************\n")
+        best = getattr(out, 'bestpar', np.nanmedian(samples, axis=0))
+        for i, name in enumerate(labels):
+            f.write(f"{name:<15} = {best[i]: .6g}\n")
+# %%
+# ------------------------------------------------------------
+# Outputs
 # ------------------------------------------------------------
 fig1, axes1 = plt.subplots(len(p0), figsize=(10, 1 + 2 * len(p0)), sharex=True)
 for i in range(len(p0)):
@@ -447,18 +563,34 @@ csv_name = output_dir / f"{planet_name}_{model_name}_bestfit.csv"
 bestfit_df.to_csv(csv_name, index=False)
 print(f"best-fit csv: {csv_name}")
 
+results_path = output_dir / f"{planet_name}_{model_name}_results.txt"
+write_results_txt(
+    results_path,
+    planet_name,
+    model_name,
+    labels,
+    out.flatchains,
+    out,
+    lc_csvfiles,
+    rv_csvfile,
+    ncores,
+    {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
+)
+print(f"results written: {results_path}")
 
+
+# %%
 # ------------------------------------------------------------
-# Phase-folded plots (LC + RV) - side-by-side with RV residuals
+# Full Fit Plot
 # ------------------------------------------------------------
 med_unpacked = unpack_params(med)
 if med_unpacked is None:
     raise ValueError("Median parameters are invalid; cannot build plots.")
 
-t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, vsini_med, lambda_med, K_med, ld_med = med_unpacked
+t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, ld_med = med_unpacked
 
-best_lc = batman_flux(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, ld_med, lc_time)
-best_rv = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, vsini_med, lambda_med, K_med, rv_time)
+best_lc = batman_flux(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, ld_med, lc_time)
+best_rv = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_time)
 
 lc_phase = ((lc_time - (t0_bjd_med - 2457000.0)) / per_med + 0.5) % 1.0 - 0.5
 rv_phase = ((rv_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
@@ -480,8 +612,8 @@ for j, idx in enumerate(sel_idx):
     if unpacked is None:
         lc_models[j, :] = np.nan
         continue
-    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, _, _, _, ld_s = unpacked
-    lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, ld_s, lc_time)
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
+    lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
 
 lc_median = np.nanmedian(lc_models, axis=0)
 lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
@@ -497,8 +629,8 @@ for j, idx in enumerate(sel_idx):
     if unpacked is None:
         models[j, :] = np.nan
         continue
-    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, vsini_s, lambda_s, K_s, _ = unpacked
-    models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, vsini_s, lambda_s, K_s, rv_time)
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
+    models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_time)
 
 median_model = np.nanmedian(models, axis=0)
 p16 = np.nanpercentile(models, 16.0, axis=0)
@@ -627,10 +759,11 @@ for ax in (ax_top, ax_bot):
     for lbl in ax.get_xticklabels() + ax.get_yticklabels():
         lbl.set_fontname(font_choice)
 
-fig3.text(0.02, 0.5, 'Normalized Flux', va='center', rotation='vertical',
+fig3.text(0.05, 0.5, 'Normalized Flux', va='center', rotation='vertical',
           fontsize=label_fontsize, fontname=font_choice)
-fig3.text(0.54, 0.5, 'Radial velocity (m/s)', va='center', rotation='vertical',
+fig3.text(0.5, 0.5, 'Radial velocity (m/s)', va='center', rotation='vertical',
           fontsize=label_fontsize, fontname=font_choice)
+
 
 fig3.tight_layout(rect=[0.02, 0.02, 1, 0.98])
 fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side.pdf"
