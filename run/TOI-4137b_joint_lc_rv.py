@@ -66,6 +66,7 @@ fit_b = True
 fit_e = True
 fit_K = True
 fit_ld = False
+fit_period = False
 
 show_lc_sigma = True
 write_chains = True
@@ -128,7 +129,10 @@ for i, u in enumerate(ld_u):
 
 
 def build_param_setup():
-    names = ["t0_bjd", "period_d", "rp_over_rstar", "a_over_rstar"]
+    names = ["t0_bjd"]
+    if fit_period:
+        names.append("period_d")
+    names += ["rp_over_rstar", "a_over_rstar"]
     if fit_b:
         names.append("impact_b")
     else:
@@ -325,8 +329,11 @@ def unpack_params(p):
     idx = 0
     t0_bjd = p[idx]
     idx += 1
-    per = p[idx]
-    idx += 1
+    if fit_period:
+        per = p[idx]
+        idx += 1
+    else:
+        per = period_fixed
     rp_over_rstar = p[idx]
     idx += 1
     a_over_rstar = p[idx]
