@@ -1,3 +1,7 @@
+# %%
+# ------------------------------------------------------------
+# Imports
+# ------------------------------------------------------------
 import sys
 from pathlib import Path
 
@@ -50,7 +54,7 @@ q_fixed = 0.0010469210379437
 period_fixed = 3.8016122  # days
 t0_bjd_fixed = 2461054.76  # BJD
 ecc = 0.0
-omega = -10.0  # deg (matches TOI-4137b_retrieval.py f_c/f_s)
+omega = -10.0  # deg
 ld_u = [0.1, 0.3]
 ld_model = "quadratic"
 
@@ -66,7 +70,7 @@ fit_b = True
 fit_e = True
 fit_K = True
 fit_ld = True
-fit_period = False
+fit_period = True
 
 show_lc_sigma = True
 write_chains = True
@@ -74,7 +78,7 @@ extend_chains = True
 thin_n = 5
 thin_burnin = 200
 
-nlink = 150000
+nlink = 10
 ncores = 4
 
 # %%
@@ -237,7 +241,7 @@ if auto_K_from_data and fit_K:
     param_config["K"]["guess"] = K_guess
     param_config["K"]["prior"] = K_lims
 
-# Precompute weighted systemic offset using initial guess (matches your retrieval flow)
+# Precompute weighted systemic offset using initial guess
 i_rad = np.radians(incl_fixed)
 rsum = (r_1_fixed + r_2_fixed)
 val = rsum / max(1e-12, np.sin(i_rad))
@@ -605,7 +609,7 @@ rv_phase = ((rv_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 lc_sort = np.argsort(lc_phase)
 rv_sort = np.argsort(rv_phase)
 
-# Posterior bands (same style as TOI-4137b_retrieval.py)
+# Posterior bands
 all_samples = out.flatchains
 nsamples_total = all_samples.shape[0]
 nsamp = min(1000, nsamples_total)
@@ -657,7 +661,7 @@ band_alpha_2sig = 0.16   # alpha for 2-sigma band
 fig3 = plt.figure(figsize=(14, 6))
 gs = fig3.add_gridspec(1, 2, width_ratios=[1, 1], wspace=0.3)
 
-# Left panel: LC with residuals (sub-grid)
+# Left panel: LC with residuals
 sub_lc = gs[0, 0].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
 ax_lc_top = fig3.add_subplot(sub_lc[0, 0])
 ax_lc_bot = fig3.add_subplot(sub_lc[1, 0], sharex=ax_lc_top)
@@ -713,7 +717,7 @@ for ax in (ax_lc_top, ax_lc_bot):
     for lbl in ax.get_xticklabels() + ax.get_yticklabels():
         lbl.set_fontname(font_choice)
 
-# Right panel: RV with residuals (sub-grid)
+# Right panel: RV with residuals
 sub = gs[0, 1].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
 ax_top = fig3.add_subplot(sub[0, 0])
 ax_bot = fig3.add_subplot(sub[1, 0], sharex=ax_top)
