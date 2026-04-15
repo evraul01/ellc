@@ -45,7 +45,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_lc_rv_ld_rho-star"
+model_name = "joint_lc_rv_ld_constrained"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -65,7 +65,7 @@ t0_guess = t0_bjd_fixed
 period_guess = period_fixed
 inc_guess = incl_fixed
 vsini_guess = 10.0
-lambda_guess = 25.0
+lambda_guess = 30.0
 
 fit_b = True
 fit_e = True
@@ -75,14 +75,14 @@ fit_period = False
 
 show_lc_sigma = True
 write_chains = True
-extend_chains = True
+extend_chains = False
 save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 10000
+nlink = 100000
 nburnin = None  # defaults to total combined nlink/100 if None
-ncores = 14
+ncores = 4
 
 # %%
 # ------------------------------------------------------------
@@ -90,14 +90,14 @@ ncores = 14
 # ------------------------------------------------------------
 auto_K_from_data = True
 K_guess = 0.5
-K_lims = [0.0, 5.0]
+K_lims = [0.0, 0.25]
 
-t0_lims = [t0_guess - 0.5, t0_guess + 0.5]
+t0_lims = [t0_guess - 0.05, t0_guess + 0.05]
 period_lims = [period_guess - 0.1, period_guess + 0.1]
-rp_lims = [0.001, 0.3]
-a_lims = [1.0, 20.0]
+rp_lims = [0.25, 0.15]
+a_lims = [5.0, 17.5]
 
-ecc_lims = [0.0, 0.9]
+ecc_lims = [0.0, 1.0]
 sqrt_e_max = np.sqrt(ecc_lims[1])
 sqrt_e_cosw_guess = np.sqrt(ecc) * np.cos(np.deg2rad(omega))
 sqrt_e_sinw_guess = np.sqrt(ecc) * np.sin(np.deg2rad(omega))
@@ -106,10 +106,10 @@ sqrt_e_sinw_lims = [-sqrt_e_max, sqrt_e_max]
 
 b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
            (1.0 - ecc**2) / (1.0 + ecc * np.sin(np.deg2rad(omega))))
-b_lims = [0.0, 1.5]
+b_lims = [0.0, 1.25]
 
-vsini_lims = [max(0.0, vsini_guess - 5.0), vsini_guess + 5.0]
-lambda_lims = [lambda_guess - 30.0, lambda_guess + 30.0]
+vsini_lims = [max(0.0, vsini_guess - 10.0), vsini_guess + 15.0]
+lambda_lims = [lambda_guess - 30.0, lambda_guess + 45.0]
 inc_lims = [70.0, 95.0]
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
 

@@ -10,6 +10,7 @@ import corner
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.contour import QuadContourSet
 
 
 def _bootstrap_paths(start_path: Path) -> None:
@@ -75,10 +76,12 @@ fit_period = False
 show_lc_sigma = True
 write_chains = True
 extend_chains = False
+save_full_chains = False
 thin_n = 5
-thin_burnin = 200
+thin_burnin = None
 
 nlink = 100000
+nburnin = None  # defaults to total combined nlink/100 if None
 ncores = 14
 
 # %%
@@ -178,6 +181,7 @@ rv_csvfile = run_dir / "data" / planet_name / "2026Jan14_TIC417646390.csv"
 output_dir = run_dir / "edmcmc_output" / planet_name
 output_dir.mkdir(parents=True, exist_ok=True)
 chains_file = output_dir / f"{planet_name}_{model_name}_chains.npz"
+full_chains_file = output_dir / f"{planet_name}_{model_name}_chains_full.npz"
 
 print(f"run_dir: {run_dir}")
 print(f"lc_csvfiles: {lc_csvfiles}")
@@ -430,12 +434,91 @@ def loglikelihood_joint(p):
 # ------------------------------------------------------------
 labels, p0, wid, parinfo = build_param_setup()
 
+def flatten_fullchains_for_posterior(fullchains, burnin, nthin):
+    nwalkers_saved, nlink_saved, npar_saved = fullchains.shape
+    if burnin >= nlink_saved:
+        return np.empty((0, npar_saved))
+    indices = burnin + np.arange(np.floor((nlink_saved - burnin) / nthin)) * nthin
+    indices = indices.astype(int)
+    return fullchains[:, indices, :].reshape(-1, npar_saved)
+
+def approximate_thinflatchains_for_posterior(thinflatchains, saved_nlink, saved_posterior_burnin, requested_posterior_burnin, saved_thin_n):
+    if requested_posterior_burnin <= saved_posterior_burnin:
+        return thinflatchains
+    saved_kept_perwalker = int(np.floor((saved_nlink - saved_posterior_burnin) / saved_thin_n))
+    if saved_kept_perwalker <= 0:
+        return np.empty((0, thinflatchains.shape[1]))
+    drop_perwalker = int(np.ceil((requested_posterior_burnin - saved_posterior_burnin) / saved_thin_n))
+    drop_perwalker = max(0, min(drop_perwalker, saved_kept_perwalker))
+    drop_fraction = drop_perwalker / float(saved_kept_perwalker)
+    n_drop = int(np.floor(thinflatchains.shape[0] * drop_fraction))
+    return thinflatchains[n_drop:, :]
+
+def compute_gelmanrubin_from_fullchains(fullchains, burnin, out):
+    if fullchains is None:
+        return None, "Combined Gelman-Rubin unavailable because previous full chains are not available."
+    cutchains = fullchains[:, burnin:, :]
+    if cutchains.shape[1] < 2:
+        return None, f"Combined Gelman-Rubin unavailable because only {cutchains.shape[1]} post-burn-in links remain per walker."
+    grstats = np.zeros(cutchains.shape[2])
+    for i in range(cutchains.shape[2]):
+        grstats[i] = out.onegelmanrubin(cutchains[:, :, i])
+    return grstats, None
+
+prev_thin = None
 pos_in = None
+prev_total_nlink = 0
+prev_fullchains = None
+prev_fullneglogl = None
 if extend_chains and chains_file.exists():
-    data = np.load(chains_file)
+    data = np.load(chains_file, allow_pickle=True)
+    if "labels" not in data:
+        raise ValueError(f"Chains file missing 'labels': {chains_file}")
+    if list(data["labels"]) != list(labels):
+        raise ValueError("Chains file labels do not match current parameter labels; refusing to extend.")
     if "lastpos" not in data:
         raise ValueError(f"Chains file missing 'lastpos': {chains_file}")
     pos_in = data["lastpos"]
+    prev_total_nlink = int(data["total_combined_nlink"]) if "total_combined_nlink" in data else int(data["nlink"])
+
+combined_total_nlink = prev_total_nlink + nlink
+effective_total_nburnin = int(combined_total_nlink / 100) if nburnin is None else nburnin
+effective_total_posterior_burnin = int(combined_total_nlink / 100) if thin_burnin is None else thin_burnin
+run_nburnin = min(nlink, max(0, effective_total_nburnin - prev_total_nlink))
+run_posterior_burnin = min(nlink, max(0, effective_total_posterior_burnin - prev_total_nlink))
+
+if extend_chains and chains_file.exists():
+    if full_chains_file.exists():
+        full_data = np.load(full_chains_file, allow_pickle=True)
+        if "labels" not in full_data:
+            raise ValueError(f"Full chain file missing 'labels': {full_chains_file}")
+        if list(full_data["labels"]) != list(labels):
+            raise ValueError("Full chain file labels do not match current parameter labels; refusing to extend.")
+        if "fullchains" not in full_data:
+            raise ValueError(f"Full chain file missing 'fullchains': {full_chains_file}")
+        full_total_nlink = int(full_data["total_combined_nlink"]) if "total_combined_nlink" in full_data else full_data["fullchains"].shape[1]
+        if full_total_nlink == prev_total_nlink:
+            prev_fullchains = full_data["fullchains"]
+            if "fullneglogl" in full_data:
+                prev_fullneglogl = full_data["fullneglogl"]
+            prev_thin = flatten_fullchains_for_posterior(prev_fullchains, effective_total_posterior_burnin, thin_n)
+    if prev_thin is None:
+        if "thinflatchains" not in data:
+            raise ValueError(f"Chains file missing 'thinflatchains': {chains_file}")
+        saved_posterior_burnin = int(data["posterior_burnin"]) if "posterior_burnin" in data else int(data["nburnin"])
+        saved_thin_n = int(data["thin_n"]) if "thin_n" in data else thin_n
+        saved_nlink = prev_total_nlink
+        prev_thin = approximate_thinflatchains_for_posterior(
+            data["thinflatchains"],
+            saved_nlink,
+            saved_posterior_burnin,
+            effective_total_posterior_burnin,
+            saved_thin_n,
+        )
+    if prev_thin.size == 0:
+        raise ValueError(
+            f"Requested burn-in ({effective_total_posterior_burnin}) removes all saved samples from the previous run."
+        )
 
 out = edm.edmcmc(
     loglikelihood_joint,
@@ -444,18 +527,21 @@ out = edm.edmcmc(
     parinfo=parinfo,
     nwalkers=100,
     nlink=nlink,
-    nburnin=int(nlink/100),
+    nburnin=run_nburnin,
     ncores=ncores,
     pos_in=pos_in,
     quiet=True,
 )
 
+new_thin = out.get_chains(nthin=thin_n, nburnin=run_posterior_burnin, flat=True)
+combined_thin = new_thin
+use_combined = extend_chains and prev_thin is not None
+if use_combined:
+    combined_thin = np.vstack([prev_thin, new_thin])
+samples_for_outputs = combined_thin if use_combined else new_thin
+
 if write_chains:
-    thinflatchains = out.get_chains(nthin=thin_n, nburnin=thin_burnin, flat=True)
-    if extend_chains and chains_file.exists():
-        prev = np.load(chains_file)
-        if "thinflatchains" in prev:
-            thinflatchains = np.vstack([prev["thinflatchains"], thinflatchains])
+    thinflatchains = combined_thin if use_combined else new_thin
     np.savez(
         chains_file,
         thinflatchains=thinflatchains,
@@ -463,17 +549,50 @@ if write_chains:
         nwalkers=out.nwalkers,
         npar=out.npar,
         nburnin=out.nburnin,
+        posterior_burnin=effective_total_posterior_burnin,
+        thin_n=thin_n,
         nlink=out.nlink,
+        total_combined_nlink=combined_total_nlink,
         labels=np.array(labels, dtype=object),
     )
     print(f"chains saved: {chains_file}")
+    if save_full_chains:
+        fullchains_to_save = out.fullchains
+        fullneglogl_to_save = out.fullneglogl
+        if extend_chains and prev_fullchains is not None and prev_fullneglogl is not None:
+            if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
+                fullchains_to_save = np.concatenate([prev_fullchains, out.fullchains], axis=1)
+                fullneglogl_to_save = np.concatenate([prev_fullneglogl, out.fullneglogl], axis=1)
+        np.savez(
+            full_chains_file,
+            fullchains=fullchains_to_save,
+            fullneglogl=fullneglogl_to_save,
+            lastpos=out.lastpos,
+            nwalkers=out.nwalkers,
+            npar=out.npar,
+            nburnin=out.nburnin,
+            posterior_burnin=effective_total_posterior_burnin,
+            thin_n=thin_n,
+            nlink=out.nlink,
+            total_combined_nlink=fullchains_to_save.shape[1],
+            labels=np.array(labels, dtype=object),
+        )
+        print(f"full chains saved: {full_chains_file}")
+
+combined_fullchains = out.fullchains
+if extend_chains and prev_fullchains is not None:
+    if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
+        combined_fullchains = np.concatenate([prev_fullchains, out.fullchains], axis=1)
+
+gr_metrics, gr_warning = compute_gelmanrubin_from_fullchains(combined_fullchains, effective_total_nburnin, out)
+output_suffix = "_combined" if extend_chains else ""
 
 
 # %%
 # ------------------------------------------------------------
 # Results.txt Function
 # ------------------------------------------------------------
-def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files, rv_file, ncores, fit_flags):
+def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files, rv_file, ncores, fit_flags, gr_metrics=None, gr_warning=None):
     header = [
         "***************************************",
         "#######################################",
@@ -514,9 +633,11 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
         "Gelman-Rubin statistics:",
     ]
 
-    gr = out.gelmanrubin()
-    for i in range(len(gr)):
-        header.append(f"Parameter {i+1} ({labels[i]}) has a Gelman-Rubin statistic of {gr[i]}")
+    if gr_metrics is not None:
+        for i in range(len(gr_metrics)):
+            header.append(f"Parameter {i+1} ({labels[i]}) has a Gelman-Rubin statistic of {gr_metrics[i]}")
+    elif gr_warning is not None:
+        header.append(f"WARNING: {gr_warning}")
 
     def write_sigma_block(fh, title, p_lo, p_hi):
         fh.write("\n******************************************\n")
@@ -546,23 +667,35 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
 # ------------------------------------------------------------
 # Outputs
 # ------------------------------------------------------------
+trace_x = out.whichlink
+trace_samples = out.flatchains
+if use_combined:
+    trace_samples = samples_for_outputs
+    trace_x = np.arange(trace_samples.shape[0])
+
 fig1, axes1 = plt.subplots(len(p0), figsize=(10, 1 + 2 * len(p0)), sharex=True)
 for i in range(len(p0)):
     ax = axes1[i]
-    ax.plot(out.whichlink, out.flatchains[:, i], ".", rasterized=True)
+    ax.plot(trace_x, trace_samples[:, i], ".", alpha=0.2, rasterized=True)
     ax.set_ylabel(labels[i])
+    ylim_pad = 0.05 * (parinfo[i]["limits"][1] - parinfo[i]["limits"][0])
+    ax.set_ylim(parinfo[i]["limits"][0] - ylim_pad, parinfo[i]["limits"][1] + ylim_pad)
 axes1[-1].set_xlabel("Link number")
-fig1_name = output_dir / f"{planet_name}_{model_name}_trace.pdf"
+fig1_name = output_dir / f"{planet_name}_{model_name}_trace{output_suffix}.pdf"
 fig1.savefig(fig1_name)
 plt.close(fig1)
 
-fig2 = corner.corner(out.flatchains, labels=labels)
-fig2_name = output_dir / f"{planet_name}_{model_name}_corner.pdf"
+fig2 = corner.corner(samples_for_outputs, labels=labels)
+for ax in fig2.axes:
+    for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
+        if not isinstance(artist, QuadContourSet):
+            artist.set_rasterized(True)
+fig2_name = output_dir / f"{planet_name}_{model_name}_corner{output_suffix}.pdf"
 fig2.savefig(fig2_name)
 plt.close(fig2)
 
-med = np.median(out.flatchains, axis=0)
-std = np.std(out.flatchains, axis=0)
+med = np.median(samples_for_outputs, axis=0)
+std = np.std(samples_for_outputs, axis=0)
 bestfit_df = pd.DataFrame(
     {
         "parameter": labels,
@@ -570,24 +703,30 @@ bestfit_df = pd.DataFrame(
         "std": std,
     }
 )
-csv_name = output_dir / f"{planet_name}_{model_name}_bestfit.csv"
+csv_name = output_dir / f"{planet_name}_{model_name}_bestfit{output_suffix}.csv"
 bestfit_df.to_csv(csv_name, index=False)
 print(f"best-fit csv: {csv_name}")
 
-results_path = output_dir / f"{planet_name}_{model_name}_results.txt"
-write_results_txt(
-    results_path,
-    planet_name,
-    model_name,
-    labels,
-    out.flatchains,
-    out,
-    lc_csvfiles,
-    rv_csvfile,
-    ncores,
-    {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
-)
-print(f"results written: {results_path}")
+results_path = output_dir / f"{planet_name}_{model_name}_results{output_suffix}.txt"
+if extend_chains and gr_metrics is None:
+    print(f"warning: {gr_warning}")
+    print(f"results skipped: {results_path}")
+else:
+    write_results_txt(
+        results_path,
+        planet_name,
+        model_name,
+        labels,
+        samples_for_outputs,
+        out,
+        lc_csvfiles,
+        rv_csvfile,
+        ncores,
+        {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
+        gr_metrics=gr_metrics,
+        gr_warning=gr_warning,
+    )
+    print(f"results written: {results_path}")
 
 
 # %%
@@ -610,7 +749,7 @@ lc_sort = np.argsort(lc_phase)
 rv_sort = np.argsort(rv_phase)
 
 # Posterior bands
-all_samples = out.flatchains
+all_samples = samples_for_outputs
 nsamples_total = all_samples.shape[0]
 nsamp = min(1000, nsamples_total)
 rng = np.random.default_rng(12345)
@@ -777,6 +916,6 @@ fig3.text(0.5, 0.5, 'Radial velocity (m/s)', va='center', rotation='vertical',
 
 
 fig3.tight_layout(rect=[0.02, 0.02, 1, 0.98])
-fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side.pdf"
+fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side{output_suffix}.pdf"
 fig3.savefig(fig3_name)
 plt.close(fig3)
