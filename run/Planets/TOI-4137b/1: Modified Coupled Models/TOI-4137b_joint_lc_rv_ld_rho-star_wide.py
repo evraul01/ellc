@@ -45,7 +45,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_lc_rv_ld_rho-star"
+model_name = "joint_lc_rv_ld_rho-star_wide"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -65,13 +65,13 @@ t0_guess = t0_bjd_fixed
 period_guess = period_fixed
 inc_guess = incl_fixed
 vsini_guess = 10.0
-lambda_guess = 25.0
+lambda_guess = 30.0
 
 fit_b = True
 fit_e = True
 fit_K = True
 fit_ld = True
-fit_period = False
+fit_period = True
 
 show_lc_sigma = True
 write_chains = True
@@ -80,15 +80,15 @@ save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 10000
+nlink = 10
 nburnin = None  # defaults to total combined nlink/10 if None
-ncores = 14
+ncores = 8
 
 # %%
 # ------------------------------------------------------------
 # Prior/step configuration
 # ------------------------------------------------------------
-auto_K_from_data = True
+auto_K_from_data = False
 K_guess = 0.5
 K_lims = [0.0, 5.0]
 
@@ -97,7 +97,7 @@ period_lims = [period_guess - 0.1, period_guess + 0.1]
 rp_lims = [0.001, 0.3]
 a_lims = [1.0, 20.0]
 
-ecc_lims = [0.0, 0.9]
+ecc_lims = [0.0, 1.0]
 sqrt_e_max = np.sqrt(ecc_lims[1])
 sqrt_e_cosw_guess = np.sqrt(ecc) * np.cos(np.deg2rad(omega))
 sqrt_e_sinw_guess = np.sqrt(ecc) * np.sin(np.deg2rad(omega))
@@ -108,16 +108,19 @@ b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
            (1.0 - ecc**2) / (1.0 + ecc * np.sin(np.deg2rad(omega))))
 b_lims = [0.0, 1.5]
 
-vsini_lims = [max(0.0, vsini_guess - 5.0), vsini_guess + 5.0]
-lambda_lims = [lambda_guess - 30.0, lambda_guess + 30.0]
+vsini_lims = [max(0.0, vsini_guess - 10.0), vsini_guess + 15.0]
+lambda_lims = [lambda_guess - 30.0, lambda_guess + 45.0]
 inc_lims = [70.0, 95.0]
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
 
 use_rho_star_prior = True
-rho_star_mu = 2.69
+rho_star_mu = 0.621
 rho_star_sigma = 0.13
+rho_star_prior_type = "uniform"
+rho_star_prior = [rho_star_mu - rho_star_sigma, rho_star_mu + rho_star_sigma]
 
 param_config = {
+
     "t0_bjd": {"guess": t0_guess, "wid": 0.0001, "prior": t0_lims},
     "period_d": {"guess": period_guess, "wid": 0.00001, "prior": period_lims},
     "rp_over_rstar": {"guess": rp_guess, "wid": 0.001, "prior": rp_lims},
@@ -154,11 +157,44 @@ def build_param_setup():
 
     p0 = [param_config[n]["guess"] for n in names]
     wid = [param_config[n]["wid"] for n in names]
-    parinfo = [
-        {"fixed": False, "limits": param_config[n]["prior"], "limited": [True, True]}
-        for n in names
-    ]
+    parinfo = []
+    for n in names:
+        prior_type = param_config[n].get("prior_type", "uniform").lower()
+        if prior_type == "uniform":
+            parinfo.append({"fixed": False, "limits": param_config[n]["prior"], "limited": [True, True]})
+        elif prior_type == "gaussian":
+            parinfo.append({"fixed": False, "limits": [0.0, 0.0], "limited": [False, False]})
+        else:
+            raise ValueError(f"Unsupported prior_type for {n}: {prior_type}")
     return names, p0, wid, parinfo
+
+
+def evaluate_prior_value(value, prior_values, prior_type="uniform"):
+    prior_type = prior_type.lower()
+    if len(prior_values) != 2:
+        raise ValueError(f"Prior specification must have exactly two values for {prior_type} priors.")
+    if prior_type == "uniform":
+        lower, upper = prior_values
+        if value < lower or value > upper:
+            return -np.inf
+        return 0.0
+    if prior_type == "gaussian":
+        mu, sigma = prior_values
+        if sigma <= 0.0:
+            raise ValueError("Gaussian prior sigma must be positive.")
+        return -0.5 * ((value - mu) / sigma) ** 2
+    raise ValueError(f"Unsupported prior_type: {prior_type}")
+
+
+def evaluate_sampled_log_prior(p, labels):
+    logp = 0.0
+    for i, name in enumerate(labels):
+        cfg = param_config[name]
+        this_logp = evaluate_prior_value(p[i], cfg["prior"], cfg.get("prior_type", "uniform"))
+        if not np.isfinite(this_logp):
+            return -np.inf
+        logp += this_logp
+    return logp
 
 
 # %%
@@ -243,7 +279,10 @@ if auto_K_from_data and fit_K:
     K_guess = 0.5 * (np.nanmax(rv_data) - np.nanmin(rv_data))
     K_lims = [0.0, max(1.0, 2.0 * K_guess)]
     param_config["K"]["guess"] = K_guess
-    param_config["K"]["prior"] = K_lims
+    if param_config["K"].get("prior_type", "uniform").lower() == "gaussian":
+        param_config["K"]["prior"] = [K_guess, param_config["K"]["prior"][1]]
+    else:
+        param_config["K"]["prior"] = K_lims
 
 # Precompute weighted systemic offset using initial guess
 i_rad = np.radians(incl_fixed)
@@ -333,6 +372,65 @@ def rho_star_from_a_over_rstar(per_days, a_over_rstar):
     per_sec = per_days * 86400.0
     return (3.0 * np.pi / (G_cgs * per_sec**2)) * (a_over_rstar**3)
 
+
+def build_derived_posterior_samples(base_samples, include_constant=False):
+    derived_labels = [
+        "rho_star_g_cm3",
+        "incl_deg_derived",
+        "planet_radius_rsun",
+        "semi_major_axis_rsun",
+    ]
+    derived_samples = np.full((base_samples.shape[0], len(derived_labels)), np.nan, dtype=float)
+
+    for i in range(base_samples.shape[0]):
+        unpacked = unpack_params(base_samples[i, :])
+        if unpacked is None:
+            continue
+        _, per, rp_over_rstar, a_over_rstar, inc_deg, _, _, _, _, _, _ = unpacked
+        derived_samples[i, 0] = rho_star_from_a_over_rstar(per, a_over_rstar)
+        derived_samples[i, 1] = inc_deg
+        derived_samples[i, 2] = a_fixed * rp_over_rstar / a_over_rstar
+        derived_samples[i, 3] = a_fixed
+
+    finite_mask = np.all(np.isfinite(derived_samples), axis=1)
+    if not np.any(finite_mask):
+        return np.empty((0, 0)), []
+
+    derived_samples = derived_samples[finite_mask]
+    keep = np.ones(len(derived_labels), dtype=bool)
+    if not include_constant:
+        keep = np.nanstd(derived_samples, axis=0) > 0.0
+    return derived_samples[:, keep], [derived_labels[j] for j in range(len(derived_labels)) if keep[j]]
+
+
+def combine_posterior_outputs(base_samples, base_labels, include_constant=False):
+    derived_samples, derived_labels = build_derived_posterior_samples(base_samples, include_constant=include_constant)
+    combined_samples = base_samples
+    combined_labels = list(base_labels)
+    if derived_labels:
+        combined_samples = np.hstack([base_samples, derived_samples])
+        combined_labels += derived_labels
+    return combined_samples, combined_labels
+
+
+def filter_constant_plot_columns(samples, labels, tol=1e-15):
+    if samples.size == 0:
+        return samples, labels
+    keep = np.zeros(samples.shape[1], dtype=bool)
+    for i in range(samples.shape[1]):
+        col = samples[:, i]
+        finite = np.isfinite(col)
+        if not np.any(finite):
+            continue
+        col_finite = col[finite]
+        span = np.nanmax(col_finite) - np.nanmin(col_finite)
+        scale = max(1.0, np.nanmax(np.abs(col_finite)))
+        keep[i] = span > tol * scale
+    if np.any(keep):
+        return samples[:, keep], [labels[i] for i in range(len(labels)) if keep[i]]
+    raise ValueError("No parameters with non-zero dynamic range are available for the corner plot.")
+
+
 def unpack_params(p):
     idx = 0
     t0_bjd = p[idx]
@@ -398,6 +496,10 @@ def unpack_params(p):
     return t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, ld_coeffs
 
 def loglikelihood_joint(p):
+    sampled_logp = evaluate_sampled_log_prior(p, labels)
+    if not np.isfinite(sampled_logp):
+        return -np.inf
+
     unpacked = unpack_params(p)
     if unpacked is None:
         return -np.inf
@@ -420,11 +522,14 @@ def loglikelihood_joint(p):
 
     chi2_lc = np.sum((lc_flux - lc_model) ** 2 / lc_flux_err**2)
     chi2_rv = np.sum((rv_data - rv_model_vals) ** 2 / rv_err**2)
-    logp = -0.5 * (chi2_lc + chi2_rv)
+    logp = sampled_logp - 0.5 * (chi2_lc + chi2_rv)
 
     if use_rho_star_prior:
         rho_star = rho_star_from_a_over_rstar(per, a_over_rstar)
-        logp += -0.5 * ((rho_star - rho_star_mu) / rho_star_sigma) ** 2
+        rho_logp = evaluate_prior_value(rho_star, rho_star_prior, rho_star_prior_type)
+        if not np.isfinite(rho_logp):
+            return -np.inf
+        logp += rho_logp
 
     return logp
 
@@ -592,7 +697,7 @@ output_suffix = "_combined" if extend_chains else ""
 # ------------------------------------------------------------
 # Results.txt Function
 # ------------------------------------------------------------
-def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files, rv_file, ncores, fit_flags, gr_metrics=None, gr_warning=None):
+def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files, rv_file, ncores, n_fit_params, fit_flags, gr_metrics=None, gr_warning=None):
     header = [
         "***************************************",
         "#######################################",
@@ -617,7 +722,8 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
         "",
         "#################################",
         "Algorithm = EDMCMC",
-        f"N_params = {len(labels)}",
+        f"N_params = {n_fit_params}",
+        f"N_reported = {len(labels)}",
         f"N_walkers = {out.nwalkers}",
         f"N_link = {out.nlink}",
         f"N_burnin = {out.nburnin}",
@@ -660,13 +766,52 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
         f.write("\n******************************************\n")
         f.write("Best-fitting parameters\n")
         f.write("******************************************\n")
-        best = getattr(out, 'bestpar', np.nanmedian(samples, axis=0))
+        best = np.nanmedian(samples, axis=0)
         for i, name in enumerate(labels):
             f.write(f"{name:<15} = {best[i]: .6g}\n")
 # %%
 # ------------------------------------------------------------
 # Outputs
 # ------------------------------------------------------------
+plot_samples, plot_labels = filter_constant_plot_columns(*combine_posterior_outputs(samples_for_outputs, labels, include_constant=False))
+summary_samples, summary_labels = combine_posterior_outputs(samples_for_outputs, labels, include_constant=True)
+
+sampled_med = np.median(samples_for_outputs, axis=0)
+summary_med = np.median(summary_samples, axis=0)
+summary_std = np.std(summary_samples, axis=0)
+bestfit_df = pd.DataFrame(
+    {
+        "parameter": summary_labels,
+        "median": summary_med,
+        "std": summary_std,
+    }
+)
+csv_name = output_dir / f"{planet_name}_{model_name}_bestfit{output_suffix}.csv"
+bestfit_df.to_csv(csv_name, index=False)
+print(f"best-fit csv: {csv_name}")
+
+results_path = output_dir / f"{planet_name}_{model_name}_results{output_suffix}.txt"
+if extend_chains and gr_metrics is None:
+    print(f"warning: {gr_warning}")
+    print(f"results skipped: {results_path}")
+else:
+    write_results_txt(
+        results_path,
+        planet_name,
+        model_name,
+        summary_labels,
+        summary_samples,
+        out,
+        lc_csvfiles,
+        rv_csvfile,
+        ncores,
+        len(p0),
+        {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
+        gr_metrics=gr_metrics,
+        gr_warning=gr_warning,
+    )
+    print(f"results written: {results_path}")
+
 trace_x = out.whichlink
 trace_samples = out.flatchains
 if use_combined:
@@ -685,7 +830,8 @@ fig1_name = output_dir / f"{planet_name}_{model_name}_trace{output_suffix}.pdf"
 fig1.savefig(fig1_name)
 plt.close(fig1)
 
-fig2 = corner.corner(samples_for_outputs, labels=labels)
+plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
+fig2 = corner.corner(plot_samples, labels=plot_labels)
 for ax in fig2.axes:
     for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
         if not isinstance(artist, QuadContourSet):
@@ -694,46 +840,12 @@ fig2_name = output_dir / f"{planet_name}_{model_name}_corner{output_suffix}.pdf"
 fig2.savefig(fig2_name)
 plt.close(fig2)
 
-med = np.median(samples_for_outputs, axis=0)
-std = np.std(samples_for_outputs, axis=0)
-bestfit_df = pd.DataFrame(
-    {
-        "parameter": labels,
-        "median": med,
-        "std": std,
-    }
-)
-csv_name = output_dir / f"{planet_name}_{model_name}_bestfit{output_suffix}.csv"
-bestfit_df.to_csv(csv_name, index=False)
-print(f"best-fit csv: {csv_name}")
-
-results_path = output_dir / f"{planet_name}_{model_name}_results{output_suffix}.txt"
-if extend_chains and gr_metrics is None:
-    print(f"warning: {gr_warning}")
-    print(f"results skipped: {results_path}")
-else:
-    write_results_txt(
-        results_path,
-        planet_name,
-        model_name,
-        labels,
-        samples_for_outputs,
-        out,
-        lc_csvfiles,
-        rv_csvfile,
-        ncores,
-        {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
-        gr_metrics=gr_metrics,
-        gr_warning=gr_warning,
-    )
-    print(f"results written: {results_path}")
-
 
 # %%
 # ------------------------------------------------------------
 # Full Fit Plot
 # ------------------------------------------------------------
-med_unpacked = unpack_params(med)
+med_unpacked = unpack_params(sampled_med)
 if med_unpacked is None:
     raise ValueError("Median parameters are invalid; cannot build plots.")
 

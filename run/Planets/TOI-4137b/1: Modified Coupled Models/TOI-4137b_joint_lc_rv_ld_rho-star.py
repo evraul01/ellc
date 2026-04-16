@@ -45,7 +45,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_lc_rv_ld_constrained"
+model_name = "joint_lc_rv_ld_rho-star"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -53,7 +53,7 @@ incl_fixed = 85.7  # deg (initial)
 a_fixed = 11.228979169999995236  # solar radii
 q_fixed = 0.0010469210379437
 period_fixed = 3.8016122  # days
-t0_bjd_fixed = 2461054.7469345736  # BJD
+t0_bjd_fixed = 2461054.76  # BJD
 ecc = 0.0
 omega = -10.0  # deg
 ld_u = [0.1, 0.3]
@@ -64,78 +64,40 @@ a_over_rstar_guess = 1.0 / r_1_fixed
 t0_guess = t0_bjd_fixed
 period_guess = period_fixed
 inc_guess = incl_fixed
-vsini_guess = 15.0
-lambda_guess = 30.0
+vsini_guess = 10.0
+lambda_guess = 25.0
 
 fit_b = True
 fit_e = True
 fit_K = True
 fit_ld = True
-fit_period = True
+fit_period = False
 
-
-report_K_in_m_per_s = True
-include_derived_rho_star = True
-include_derived_inclination = True
-include_derived_planet_radius = True
-include_derived_semi_major_axis = True
-
-R_SUN_TO_R_EARTH = 109.076
-R_SUN_TO_AU = 0.00465047
-
-corner_label_fontsize = 16
-corner_label_map = {
-    "t0_bjd": r"$t_0$ (BJD)",
-    "period_d": r"$P$ (d)",
-    "rp_over_rstar": r"$R_{\rm p}/R_\star$",
-    "a_over_rstar": r"$a/R_\star$",
-    "impact_b": r"$b$",
-    "inc_deg": r"$i$ ($^\circ$)",
-    "sqrt_e_cosw": r"$\sqrt{e}\cos\omega_\star$",
-    "sqrt_e_sinw": r"$\sqrt{e}\sin\omega_\star$",
-    "vsini": r"$v \sin i_\star$ (km s$^{-1}$)",
-    "lambda": r"$\lambda$ ($^\circ$)",
-    "K": r"$K$ (km s$^{-1}$)",
-    "K_m_s": r"$K$ (m s$^{-1}$)",
-    "ld_u1": r"$u_1$",
-    "ld_u2": r"$u_2$",
-    "rho_star_g_cm3": r"$\rho_\star$ (g cm$^{-3}$)",
-    "incl_deg_derived": r"$i$ ($^\circ$)",
-    "planet_radius_rearth": r"$R_{\rm p}$ ($R_\oplus$)",
-    "semi_major_axis_au": r"$a$ (au)",
-}
 show_lc_sigma = True
-show_lc_binned_points = True
-lc_phase_bin_width = 0.0025
-lc_raw_alpha = 0.1
-lc_raw_label = "Data"
-lc_binned_label = "Average Binned Data"
-lc_model_label = "Median Model"
 write_chains = True
-extend_chains = False
+extend_chains = True
 save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 125000
-# nlink = 500
-nburnin = 25000  # defaults to total combined nlink/10 if None
-ncores = 9
+nlink = 10000
+nburnin = None  # defaults to total combined nlink/10 if None
+ncores = 14
 
 # %%
 # ------------------------------------------------------------
 # Prior/step configuration
 # ------------------------------------------------------------
 auto_K_from_data = False
-K_guess = 0.125
-K_lims = [0.0, 1.0]
+K_guess = 0.5
+K_lims = [0.0, 5.0]
 
-t0_lims = [t0_guess - 0.01, t0_guess + 0.01]
+t0_lims = [t0_guess - 0.5, t0_guess + 0.5]
 period_lims = [period_guess - 0.1, period_guess + 0.1]
-rp_lims = [0.025, 0.15]
-a_lims = [5.0, 17.5]
+rp_lims = [0.001, 0.3]
+a_lims = [1.0, 20.0]
 
-ecc_lims = [0.0, 1.0]
+ecc_lims = [0.0, 0.9]
 sqrt_e_max = np.sqrt(ecc_lims[1])
 sqrt_e_cosw_guess = np.sqrt(ecc) * np.cos(np.deg2rad(omega))
 sqrt_e_sinw_guess = np.sqrt(ecc) * np.sin(np.deg2rad(omega))
@@ -144,10 +106,10 @@ sqrt_e_sinw_lims = [-sqrt_e_max, sqrt_e_max]
 
 b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
            (1.0 - ecc**2) / (1.0 + ecc * np.sin(np.deg2rad(omega))))
-b_lims = [0.0, 1.0]
+b_lims = [0.0, 1.5]
 
-vsini_lims = [max(0.0, vsini_guess - 15.0), vsini_guess + 15.0]
-lambda_lims = [lambda_guess - 210.0, lambda_guess + 150.0]
+vsini_lims = [max(0.0, vsini_guess - 5.0), vsini_guess + 5.0]
+lambda_lims = [lambda_guess - 30.0, lambda_guess + 30.0]
 inc_lims = [70.0, 95.0]
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
 
@@ -159,7 +121,7 @@ rho_star_prior = [rho_star_mu - rho_star_sigma, rho_star_mu + rho_star_sigma]
 
 param_config = {
 
-    "t0_bjd": {"guess": t0_guess, "wid": 0.00005, "prior": t0_lims},
+    "t0_bjd": {"guess": t0_guess, "wid": 0.0001, "prior": t0_lims},
     "period_d": {"guess": period_guess, "wid": 0.00001, "prior": period_lims},
     "rp_over_rstar": {"guess": rp_guess, "wid": 0.001, "prior": rp_lims},
     "a_over_rstar": {"guess": a_over_rstar_guess, "wid": 0.02, "prior": a_lims},
@@ -412,19 +374,12 @@ def rho_star_from_a_over_rstar(per_days, a_over_rstar):
 
 
 def build_derived_posterior_samples(base_samples, include_constant=False):
-    derived_labels = []
-    if include_derived_rho_star:
-        derived_labels.append("rho_star_g_cm3")
-    if include_derived_inclination:
-        derived_labels.append("incl_deg_derived")
-    if include_derived_planet_radius:
-        derived_labels.append("planet_radius_rearth")
-    if include_derived_semi_major_axis:
-        derived_labels.append("semi_major_axis_au")
-
-    if not derived_labels:
-        return np.empty((base_samples.shape[0], 0)), []
-
+    derived_labels = [
+        "rho_star_g_cm3",
+        "incl_deg_derived",
+        "planet_radius_rsun",
+        "semi_major_axis_rsun",
+    ]
     derived_samples = np.full((base_samples.shape[0], len(derived_labels)), np.nan, dtype=float)
 
     for i in range(base_samples.shape[0]):
@@ -432,18 +387,10 @@ def build_derived_posterior_samples(base_samples, include_constant=False):
         if unpacked is None:
             continue
         _, per, rp_over_rstar, a_over_rstar, inc_deg, _, _, _, _, _, _ = unpacked
-        col = 0
-        if include_derived_rho_star:
-            derived_samples[i, col] = rho_star_from_a_over_rstar(per, a_over_rstar)
-            col += 1
-        if include_derived_inclination:
-            derived_samples[i, col] = inc_deg
-            col += 1
-        if include_derived_planet_radius:
-            derived_samples[i, col] = a_fixed * rp_over_rstar / a_over_rstar * R_SUN_TO_R_EARTH
-            col += 1
-        if include_derived_semi_major_axis:
-            derived_samples[i, col] = a_fixed * R_SUN_TO_AU
+        derived_samples[i, 0] = rho_star_from_a_over_rstar(per, a_over_rstar)
+        derived_samples[i, 1] = inc_deg
+        derived_samples[i, 2] = a_fixed * rp_over_rstar / a_over_rstar
+        derived_samples[i, 3] = a_fixed
 
     finite_mask = np.all(np.isfinite(derived_samples), axis=1)
     if not np.any(finite_mask):
@@ -456,20 +403,6 @@ def build_derived_posterior_samples(base_samples, include_constant=False):
     return derived_samples[:, keep], [derived_labels[j] for j in range(len(derived_labels)) if keep[j]]
 
 
-def transform_output_samples(samples, labels):
-    transformed_samples = np.array(samples, copy=True)
-    transformed_labels = list(labels)
-    for i, name in enumerate(transformed_labels):
-        if name == "K" and report_K_in_m_per_s:
-            transformed_samples[:, i] = transformed_samples[:, i] * 1e3
-            transformed_labels[i] = "K_m_s"
-    return transformed_samples, transformed_labels
-
-
-def get_plot_display_labels(labels):
-    return [corner_label_map.get(label, label) for label in labels]
-
-
 def combine_posterior_outputs(base_samples, base_labels, include_constant=False):
     derived_samples, derived_labels = build_derived_posterior_samples(base_samples, include_constant=include_constant)
     combined_samples = base_samples
@@ -477,7 +410,7 @@ def combine_posterior_outputs(base_samples, base_labels, include_constant=False)
     if derived_labels:
         combined_samples = np.hstack([base_samples, derived_samples])
         combined_labels += derived_labels
-    return transform_output_samples(combined_samples, combined_labels)
+    return combined_samples, combined_labels
 
 
 def filter_constant_plot_columns(samples, labels, tol=1e-15):
@@ -898,8 +831,7 @@ fig1.savefig(fig1_name)
 plt.close(fig1)
 
 plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
-corner_display_labels = get_plot_display_labels(plot_labels)
-fig2 = corner.corner(plot_samples, labels=corner_display_labels, label_kwargs={"fontsize": corner_label_fontsize})
+fig2 = corner.corner(plot_samples, labels=plot_labels)
 for ax in fig2.axes:
     for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
         if not isinstance(artist, QuadContourSet):
@@ -950,48 +882,6 @@ lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
 lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
 lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
 lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
-
-lc_residuals = lc_flux - lc_median
-lc_plot_window = 0.05
-
-lc_binned_phase = np.array([])
-lc_binned_flux = np.array([])
-lc_binned_flux_err = np.array([])
-lc_binned_residual = np.array([])
-lc_binned_residual_err = np.array([])
-if show_lc_binned_points:
-    lc_bin_mask = np.abs(lc_phase) <= lc_plot_window
-    lc_phase_bins = np.arange(-lc_plot_window, lc_plot_window + lc_phase_bin_width, lc_phase_bin_width)
-    if lc_phase_bins[-1] < lc_plot_window:
-        lc_phase_bins = np.append(lc_phase_bins, lc_plot_window)
-    lc_bin_index = np.digitize(lc_phase[lc_bin_mask], lc_phase_bins) - 1
-
-    binned_phase = []
-    binned_flux = []
-    binned_flux_err = []
-    binned_residual = []
-    binned_residual_err = []
-    phase_in_window = lc_phase[lc_bin_mask]
-    flux_in_window = lc_flux[lc_bin_mask]
-    flux_err_in_window = lc_flux_err[lc_bin_mask]
-    residual_in_window = lc_residuals[lc_bin_mask]
-    for i in range(len(lc_phase_bins) - 1):
-        in_bin = lc_bin_index == i
-        if not np.any(in_bin):
-            continue
-        weights = 1.0 / np.maximum(flux_err_in_window[in_bin], 1e-12) ** 2
-        weight_sum = np.sum(weights)
-        binned_phase.append(np.sum(weights * phase_in_window[in_bin]) / weight_sum)
-        binned_flux.append(np.sum(weights * flux_in_window[in_bin]) / weight_sum)
-        binned_flux_err.append(np.sqrt(1.0 / weight_sum))
-        binned_residual.append(np.sum(weights * residual_in_window[in_bin]) / weight_sum)
-        binned_residual_err.append(np.sqrt(1.0 / weight_sum))
-
-    lc_binned_phase = np.asarray(binned_phase)
-    lc_binned_flux = np.asarray(binned_flux)
-    lc_binned_flux_err = np.asarray(binned_flux_err)
-    lc_binned_residual = np.asarray(binned_residual)
-    lc_binned_residual_err = np.asarray(binned_residual_err)
 
 # RV posterior models
 ntime = len(rv_time)
@@ -1050,63 +940,28 @@ ax_lc_top.errorbar(
     yerr=lc_flux_err,
     fmt=".",
     ms=marker_size,
-    alpha=lc_raw_alpha,
+    alpha=0.6,
     color="k",
-    label=lc_raw_label,
-    zorder=2,
+    label="Data",
 )
-ax_lc_top.plot(
-    lc_phase[lc_sort],
-    lc_median[lc_sort],
-    color="red",
-    lw=model_linewidth,
-    label=lc_model_label,
-    zorder=4,
-)
-if show_lc_binned_points and lc_binned_phase.size > 0:
-    ax_lc_top.errorbar(
-        lc_binned_phase,
-        lc_binned_flux,
-        yerr=lc_binned_flux_err,
-        fmt='o',
-        ms=marker_size,
-        mfc='k',
-        mec='k',
-        ecolor='k',
-        alpha=1.0,
-        label=lc_binned_label,
-        zorder=5,
-    )
-ax_lc_top.set_xlim(-lc_plot_window, lc_plot_window)
+ax_lc_top.plot(lc_phase[lc_sort], lc_median[lc_sort], color="red", lw=model_linewidth, label="Median Model")
+ax_lc_top.set_xlim(-0.05, 0.05)
 ax_lc_top.tick_params(axis='both', labelsize=tick_fontsize)
 ax_lc_top.legend(prop={'size': legend_fontsize, 'family': font_choice}, loc='best')
 
+lc_residuals = lc_flux - lc_median
 ax_lc_bot.errorbar(
     lc_phase,
     lc_residuals,
     yerr=lc_flux_err,
     fmt=".",
     ms=marker_size,
-    alpha=lc_raw_alpha,
+    alpha=0.6,
     color="k",
-    zorder=2,
 )
-ax_lc_bot.axhline(0.0, color='red', linestyle='-', alpha=0.7, zorder=4)
-if show_lc_binned_points and lc_binned_phase.size > 0:
-    ax_lc_bot.errorbar(
-        lc_binned_phase,
-        lc_binned_residual,
-        yerr=lc_binned_residual_err,
-        fmt='o',
-        ms=marker_size,
-        mfc='k',
-        mec='k',
-        ecolor='k',
-        alpha=1.0,
-        zorder=5,
-    )
+ax_lc_bot.axhline(0.0, color='red', linestyle='-', alpha=0.7)
 ax_lc_bot.set_xlabel("Phase", fontsize=label_fontsize, fontname=font_choice)
-ax_lc_bot.set_xlim(-lc_plot_window, lc_plot_window)
+ax_lc_bot.set_xlim(-0.05, 0.05)
 ax_lc_bot.tick_params(axis='both', labelsize=tick_fontsize)
 
 for ax in (ax_lc_top, ax_lc_bot):
