@@ -81,7 +81,7 @@ thin_n = 5
 thin_burnin = None
 
 nlink = 100000
-nburnin = None  # defaults to total combined nlink/100 if None
+nburnin = None  # defaults to total combined nlink/10 if None
 ncores = 4
 
 # %%
@@ -482,8 +482,8 @@ if extend_chains and chains_file.exists():
     prev_total_nlink = int(data["total_combined_nlink"]) if "total_combined_nlink" in data else int(data["nlink"])
 
 combined_total_nlink = prev_total_nlink + nlink
-effective_total_nburnin = int(combined_total_nlink / 100) if nburnin is None else nburnin
-effective_total_posterior_burnin = int(combined_total_nlink / 100) if thin_burnin is None else thin_burnin
+effective_total_nburnin = int(combined_total_nlink / 10) if nburnin is None else nburnin
+effective_total_posterior_burnin = int(combined_total_nlink / 10) if thin_burnin is None else thin_burnin
 run_nburnin = min(nlink, max(0, effective_total_nburnin - prev_total_nlink))
 run_posterior_burnin = min(nlink, max(0, effective_total_posterior_burnin - prev_total_nlink))
 
