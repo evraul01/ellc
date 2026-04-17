@@ -45,7 +45,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_stacked_lc_rv_ld_wide_rho-star"
+model_name = "joint_stacked_lc_rv_wide"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -87,7 +87,7 @@ corner_label_fontsize = 16
 show_lc_sigma = True
 show_lc_binned_points = True
 lc_phase_bin_width = 0.0025
-lc_raw_alpha = 0.1
+lc_raw_alpha = 0.0125
 lc_raw_label = "Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
@@ -97,7 +97,7 @@ save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 1000
+nlink = 150000
 # nlink = 500
 nburnin = None  # defaults to total combined nlink/10 if None
 ncores = 10
@@ -108,7 +108,7 @@ ncores = 10
 # ------------------------------------------------------------
 auto_K_from_data = False
 K_guess = 0.125
-K_lims = [0.0, 0.250]
+K_lims = [0.0, 0.500]
 
 t0_lims = [t0_guess - 0.01, t0_guess + 0.01]
 period_lims = [period_guess - 0.1, period_guess + 0.1]

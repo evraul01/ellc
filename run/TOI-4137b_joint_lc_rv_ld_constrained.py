@@ -84,30 +84,10 @@ R_SUN_TO_R_EARTH = 109.076
 R_SUN_TO_AU = 0.00465047
 
 corner_label_fontsize = 16
-corner_label_map = {
-    "t0_bjd": r"$t_0$ (BJD)",
-    "period_d": r"$P$ (d)",
-    "rp_over_rstar": r"$R_{\rm p}/R_\star$",
-    "a_over_rstar": r"$a/R_\star$",
-    "impact_b": r"$b$",
-    "inc_deg": r"$i$ ($^\circ$)",
-    "sqrt_e_cosw": r"$\sqrt{e}\cos\omega_\star$",
-    "sqrt_e_sinw": r"$\sqrt{e}\sin\omega_\star$",
-    "vsini": r"$v \sin i_\star$ (km s$^{-1}$)",
-    "lambda": r"$\lambda$ ($^\circ$)",
-    "K": r"$K$ (km s$^{-1}$)",
-    "K_m_s": r"$K$ (m s$^{-1}$)",
-    "ld_u1": r"$u_1$",
-    "ld_u2": r"$u_2$",
-    "rho_star_g_cm3": r"$\rho_\star$ (g cm$^{-3}$)",
-    "incl_deg_derived": r"$i$ ($^\circ$)",
-    "planet_radius_rearth": r"$R_{\rm p}$ ($R_\oplus$)",
-    "semi_major_axis_au": r"$a$ (au)",
-}
 show_lc_sigma = True
 show_lc_binned_points = True
 lc_phase_bin_width = 0.0025
-lc_raw_alpha = 0.1
+lc_raw_alpha = 0.0125
 lc_raw_label = "Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
@@ -128,7 +108,7 @@ ncores = 9
 # ------------------------------------------------------------
 auto_K_from_data = False
 K_guess = 0.125
-K_lims = [0.0, 1.0]
+K_lims = [0.0, 0.250]
 
 t0_lims = [t0_guess - 0.01, t0_guess + 0.01]
 period_lims = [period_guess - 0.1, period_guess + 0.1]
@@ -170,6 +150,27 @@ param_config = {
     "vsini": {"guess": vsini_guess, "wid": 0.2, "prior": vsini_lims},
     "lambda": {"guess": lambda_guess, "wid": 1.0, "prior": lambda_lims},
     "K": {"guess": K_guess, "wid": 0.05, "prior": K_lims},
+}
+
+corner_label_map = {
+    "t0_bjd": r"$t_0$ (BJD)",
+    "period_d": r"$P$ (d)",
+    "rp_over_rstar": r"$R_{\rm p}/R_\star$",
+    "a_over_rstar": r"$a/R_\star$",
+    "impact_b": r"$b$",
+    "inc_deg": r"$i$ ($^\circ$)",
+    "sqrt_e_cosw": r"$\sqrt{e}\cos\omega_\star$",
+    "sqrt_e_sinw": r"$\sqrt{e}\sin\omega_\star$",
+    "vsini": r"$v \sin i_\star$ (km s$^{-1}$)",
+    "lambda": r"$\lambda$ ($^\circ$)",
+    "K": r"$K$ (km s$^{-1}$)",
+    "K_m_s": r"$K$ (m s$^{-1}$)",
+    "ld_u1": r"$u_1$",
+    "ld_u2": r"$u_2$",
+    "rho_star_g_cm3": r"$\rho_\star$ (g cm$^{-3}$)",
+    "incl_deg_derived": r"$i$ ($^\circ$)",
+    "planet_radius_rearth": r"$R_{\rm p}$ ($R_\oplus$)",
+    "semi_major_axis_au": r"$a$ (au)",
 }
 
 for i, u in enumerate(ld_u):
