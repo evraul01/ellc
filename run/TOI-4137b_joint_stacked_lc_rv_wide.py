@@ -51,6 +51,7 @@ r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
 incl_fixed = 85.7  # deg (initial)
 a_fixed = 11.228979169999995236  # solar radii
+stellar_radius_fixed = a_fixed * r_1_fixed  # solar radii
 q_fixed = 0.0010469210379437
 period_fixed = 3.8016122  # days
 t0_bjd_fixed = 2461054.7469345736  # BJD
@@ -100,7 +101,7 @@ thin_burnin = None
 nlink = 150000
 # nlink = 500
 nburnin = None  # defaults to total combined nlink/10 if None
-ncores = 10
+ncores = 4
 
 # %%
 # ------------------------------------------------------------
@@ -110,10 +111,10 @@ auto_K_from_data = False
 K_guess = 0.125
 K_lims = [0.0, 0.500]
 
-t0_lims = [t0_guess - 0.01, t0_guess + 0.01]
-period_lims = [period_guess - 0.1, period_guess + 0.1]
-rp_lims = [0.025, 0.15]
-a_lims = [2.5, 20.0]
+t0_lims = [t0_guess - 0.001, t0_guess + 0.001]
+period_lims = [period_guess - 0.1, period_guess + 0.1]  # ignored
+rp_lims = [0.0, 1.0]
+a_lims = [2.5, 20.0]  # ignored
 
 ecc_lims = [0.0, 1.0]
 sqrt_e_max = np.sqrt(ecc_lims[1])
@@ -127,24 +128,24 @@ b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
 b_lims = [0.0, 1.0]
 
 vsini_lims = [max(0.0, vsini_guess - 15.0), vsini_guess + 15.0]
-lambda_lims = [lambda_guess - 60.0, lambda_guess + 60.0]
-inc_lims = [70.0, 95.0]
+lambda_lims = [lambda_guess - 210.0, lambda_guess + 180.0]
+inc_lims = [70.0, 90.0]  # ignored
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
 
 use_rho_star_prior = True
 rho_star_mu = 0.621
-rho_star_sigma = 0.50
-rho_star_prior_type = "uniform"
+rho_star_sigma = 0.1
+rho_star_prior_type = "gaussian"
 rho_star_prior = [rho_star_mu - rho_star_sigma, rho_star_mu + rho_star_sigma]
 
 param_config = {
 
     "t0_bjd": {"guess": t0_guess, "wid": 0.00005, "prior": t0_lims},
-    "period_d": {"guess": period_guess, "wid": 0.00001, "prior": period_lims},
+    "period_d": {"guess": period_guess, "wid": 0.00001, "prior_type": "none", "prior": period_lims},
     "rp_over_rstar": {"guess": rp_guess, "wid": 0.001, "prior": rp_lims},
-    "a_over_rstar": {"guess": a_over_rstar_guess, "wid": 0.02, "prior": a_lims},
+    "a_over_rstar": {"guess": a_over_rstar_guess, "wid": 0.02, "prior_type": "none", "prior": a_lims},
     "impact_b": {"guess": b_guess, "wid": 0.01, "prior": b_lims},
-    "inc_deg": {"guess": inc_guess, "wid": 0.02, "prior": inc_lims},
+    "inc_deg": {"guess": inc_guess, "wid": 0.02, "prior_type": "none", "prior": inc_lims},
     "sqrt_e_cosw": {"guess": sqrt_e_cosw_guess, "wid": 0.05, "prior": sqrt_e_cosw_lims},
     "sqrt_e_sinw": {"guess": sqrt_e_sinw_guess, "wid": 0.05, "prior": sqrt_e_sinw_lims},
     "vsini": {"guess": vsini_guess, "wid": 0.2, "prior": vsini_lims},
@@ -203,6 +204,8 @@ def build_param_setup():
             parinfo.append({"fixed": False, "limits": param_config[n]["prior"], "limited": [True, True]})
         elif prior_type == "gaussian":
             parinfo.append({"fixed": False, "limits": [0.0, 0.0], "limited": [False, False]})
+        elif prior_type == "none":
+            parinfo.append({"fixed": False, "limits": [0.0, 0.0], "limited": [False, False]})
         else:
             raise ValueError(f"Unsupported prior_type for {n}: {prior_type}")
     return names, p0, wid, parinfo
@@ -210,6 +213,8 @@ def build_param_setup():
 
 def evaluate_prior_value(value, prior_values, prior_type="uniform"):
     prior_type = prior_type.lower()
+    if prior_type == "none":
+        return 0.0
     if len(prior_values) != 2:
         raise ValueError(f"Prior specification must have exactly two values for {prior_type} priors.")
     if prior_type == "uniform":
@@ -318,9 +323,10 @@ if auto_K_from_data and fit_K:
     K_guess = 0.5 * (np.nanmax(rv_data) - np.nanmin(rv_data))
     K_lims = [0.0, max(1.0, 2.0 * K_guess)]
     param_config["K"]["guess"] = K_guess
-    if param_config["K"].get("prior_type", "uniform").lower() == "gaussian":
+    k_prior_type = param_config["K"].get("prior_type", "uniform").lower()
+    if k_prior_type == "gaussian":
         param_config["K"]["prior"] = [K_guess, param_config["K"]["prior"][1]]
-    else:
+    elif k_prior_type == "uniform":
         param_config["K"]["prior"] = K_lims
 
 # Precompute weighted systemic offset using initial guess
@@ -369,9 +375,14 @@ def batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omeg
         return np.full_like(time_axis, np.nan)
 
 
+def semi_major_axis_from_a_over_rstar(a_over_rstar):
+    return a_over_rstar * stellar_radius_fixed
+
+
 def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K, time_axis):
     r_1 = 1.0 / a_over_rstar
     r_2 = rp_over_rstar * r_1
+    a_orbit = semi_major_axis_from_a_over_rstar(a_over_rstar)
 
     rv_call = ellc.rv(
         time_axis,
@@ -381,7 +392,7 @@ def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_v
         radius_1=r_1,
         radius_2=r_2,
         incl=inc_deg,
-        a=a_fixed,
+        a=a_orbit,
         f_c=np.sqrt(ecc_val) * np.cos(np.deg2rad(omega_val)),
         f_s=np.sqrt(ecc_val) * np.sin(np.deg2rad(omega_val)),
         q=q_fixed,
@@ -441,10 +452,10 @@ def build_derived_posterior_samples(base_samples, include_constant=False):
             derived_samples[i, col] = inc_deg
             col += 1
         if include_derived_planet_radius:
-            derived_samples[i, col] = a_fixed * rp_over_rstar / a_over_rstar * R_SUN_TO_R_EARTH
+            derived_samples[i, col] = rp_over_rstar * stellar_radius_fixed * R_SUN_TO_R_EARTH
             col += 1
         if include_derived_semi_major_axis:
-            derived_samples[i, col] = a_fixed * R_SUN_TO_AU
+            derived_samples[i, col] = semi_major_axis_from_a_over_rstar(a_over_rstar) * R_SUN_TO_AU
 
     finite_mask = np.all(np.isfinite(derived_samples), axis=1)
     if not np.any(finite_mask):
@@ -846,12 +857,14 @@ summary_samples, summary_labels = combine_posterior_outputs(samples_for_outputs,
 
 sampled_med = np.median(samples_for_outputs, axis=0)
 summary_med = np.median(summary_samples, axis=0)
-summary_std = np.std(summary_samples, axis=0)
+summary_p16 = np.nanpercentile(summary_samples, 15.865, axis=0)
+summary_p84 = np.nanpercentile(summary_samples, 84.135, axis=0)
 bestfit_df = pd.DataFrame(
     {
         "parameter": summary_labels,
         "median": summary_med,
-        "std": summary_std,
+        "p16": summary_p16,
+        "p84": summary_p84,
     }
 )
 csv_name = output_dir / f"{planet_name}_{model_name}_bestfit{output_suffix}.csv"
