@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.contour import QuadContourSet
+from matplotlib.lines import Line2D
 
 
 def _bootstrap_paths(start_path: Path) -> None:
@@ -88,17 +89,17 @@ corner_label_fontsize = 16
 show_lc_sigma = True
 show_lc_binned_points = True
 lc_phase_bin_width = 0.0025
-lc_raw_alpha = 0.0125
-lc_raw_label = "Data"
+lc_raw_alpha = 0.025
+lc_raw_label = "Phase-Folded Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
 write_chains = True
-extend_chains = False
+extend_chains = True
 save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 150000
+nlink = 10
 # nlink = 500
 nburnin = None  # defaults to total combined nlink/10 if None
 ncores = 4
@@ -136,7 +137,10 @@ use_rho_star_prior = True
 rho_star_mu = 0.621
 rho_star_sigma = 0.1
 rho_star_prior_type = "gaussian"
-rho_star_prior = [rho_star_mu - rho_star_sigma, rho_star_mu + rho_star_sigma]
+if rho_star_prior_type.lower() == "gaussian":
+    rho_star_prior = [rho_star_mu, rho_star_sigma]
+else:
+    rho_star_prior = [rho_star_mu - rho_star_sigma, rho_star_mu + rho_star_sigma]
 
 param_config = {
 
@@ -649,6 +653,35 @@ def compute_gelmanrubin_from_fullchains(fullchains, burnin, out):
         grstats[i] = out.onegelmanrubin(cutchains[:, :, i])
     return grstats, None
 
+
+class SavedChainReplay:
+    def __init__(self, thin_samples, nwalkers, npar, nlink, nburnin, fullchains=None, fullneglogl=None):
+        self.flatchains = thin_samples
+        self.nwalkers = nwalkers
+        self.npar = npar
+        self.nlink = nlink
+        self.nburnin = nburnin
+        self.fullchains = fullchains
+        self.fullneglogl = fullneglogl
+        if fullchains is not None:
+            post_burn = fullchains[:, nburnin:nlink, :]
+            npost = post_burn.shape[1]
+            self.flatchains = post_burn.reshape(nwalkers * npost, npar)
+            self.whichlink = np.tile(np.arange(nburnin, nlink), nwalkers)
+        else:
+            self.whichlink = np.arange(self.flatchains.shape[0])
+
+    def onegelmanrubin(self, chain):
+        ssq = np.var(chain, axis=1, ddof=1)
+        W = np.mean(ssq, axis=0)
+        thetab = np.mean(chain, axis=1)
+        thetabb = np.mean(thetab, axis=0)
+        m = chain.shape[0]
+        n = chain.shape[1]
+        B = n / (m - 1) * np.sum((thetabb - thetab)**2, axis=0)
+        var_theta = (n - 1) / n * W + 1 / n * B
+        return np.sqrt(var_theta / W)
+
 prev_thin = None
 pos_in = None
 prev_total_nlink = 0
@@ -703,54 +736,91 @@ if extend_chains and chains_file.exists():
         raise ValueError(
             f"Requested burn-in ({effective_total_posterior_burnin}) removes all saved samples from the previous run."
         )
-
-out = edm.edmcmc(
-    loglikelihood_joint,
-    p0,
-    wid,
-    parinfo=parinfo,
-    nwalkers=100,
-    nlink=nlink,
-    nburnin=run_nburnin,
-    ncores=ncores,
-    pos_in=pos_in,
-    quiet=True,
-)
-
-new_thin = out.get_chains(nthin=thin_n, nburnin=run_posterior_burnin, flat=True)
-combined_thin = new_thin
 use_combined = extend_chains and prev_thin is not None
-if use_combined:
-    combined_thin = np.vstack([prev_thin, new_thin])
-samples_for_outputs = combined_thin if use_combined else new_thin
+if nlink == 0:
+    if not chains_file.exists():
+        raise FileNotFoundError(f"Cannot re-plot with nlink=0 because no saved chain file exists: {chains_file}")
+    saved = np.load(chains_file, allow_pickle=True)
+    if "labels" not in saved:
+        raise ValueError(f"Chains file missing 'labels': {chains_file}")
+    if list(saved["labels"]) != list(labels):
+        raise ValueError("Saved chain labels do not match current parameter labels; refusing to re-plot.")
+    if "thinflatchains" not in saved:
+        raise ValueError(f"Chains file missing 'thinflatchains': {chains_file}")
 
-if write_chains:
-    thinflatchains = combined_thin if use_combined else new_thin
-    np.savez(
-        chains_file,
-        thinflatchains=thinflatchains,
-        lastpos=out.lastpos,
-        nwalkers=out.nwalkers,
-        npar=out.npar,
-        nburnin=out.nburnin,
-        posterior_burnin=effective_total_posterior_burnin,
-        thin_n=thin_n,
-        nlink=out.nlink,
-        total_combined_nlink=combined_total_nlink,
-        labels=np.array(labels, dtype=object),
+    saved_total_nlink = int(saved["total_combined_nlink"]) if "total_combined_nlink" in saved else int(saved["nlink"])
+    saved_posterior_burnin = int(saved["posterior_burnin"]) if "posterior_burnin" in saved else int(saved["nburnin"])
+    saved_thin_n = int(saved["thin_n"]) if "thin_n" in saved else thin_n
+
+    combined_total_nlink = saved_total_nlink
+    effective_total_nburnin = int(combined_total_nlink / 10) if nburnin is None else nburnin
+    effective_total_posterior_burnin = int(combined_total_nlink / 10) if thin_burnin is None else thin_burnin
+
+    combined_fullchains = None
+    combined_fullneglogl = None
+    if full_chains_file.exists():
+        full_saved = np.load(full_chains_file, allow_pickle=True)
+        if "labels" not in full_saved:
+            raise ValueError(f"Full chain file missing 'labels': {full_chains_file}")
+        if list(full_saved["labels"]) != list(labels):
+            raise ValueError("Saved full-chain labels do not match current parameter labels; refusing to re-plot.")
+        if "fullchains" not in full_saved:
+            raise ValueError(f"Full chain file missing 'fullchains': {full_chains_file}")
+        combined_fullchains = full_saved["fullchains"]
+        if "fullneglogl" in full_saved:
+            combined_fullneglogl = full_saved["fullneglogl"]
+
+    if combined_fullchains is not None:
+        samples_for_outputs = flatten_fullchains_for_posterior(
+            combined_fullchains,
+            effective_total_posterior_burnin,
+            thin_n,
+        )
+    else:
+        samples_for_outputs = approximate_thinflatchains_for_posterior(
+            saved["thinflatchains"],
+            saved_total_nlink,
+            saved_posterior_burnin,
+            effective_total_posterior_burnin,
+            saved_thin_n,
+        )
+    if samples_for_outputs.size == 0:
+        raise ValueError("Requested posterior burn-in removes all saved samples; nothing left to re-plot.")
+
+    out = SavedChainReplay(
+        thin_samples=samples_for_outputs,
+        nwalkers=int(saved["nwalkers"]),
+        npar=int(saved["npar"]),
+        nlink=combined_total_nlink,
+        nburnin=effective_total_nburnin,
+        fullchains=combined_fullchains,
+        fullneglogl=combined_fullneglogl,
     )
-    print(f"chains saved: {chains_file}")
-    if save_full_chains:
-        fullchains_to_save = out.fullchains
-        fullneglogl_to_save = out.fullneglogl
-        if extend_chains and prev_fullchains is not None and prev_fullneglogl is not None:
-            if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
-                fullchains_to_save = np.concatenate([prev_fullchains, out.fullchains], axis=1)
-                fullneglogl_to_save = np.concatenate([prev_fullneglogl, out.fullneglogl], axis=1)
+else:
+    out = edm.edmcmc(
+        loglikelihood_joint,
+        p0,
+        wid,
+        parinfo=parinfo,
+        nwalkers=100,
+        nlink=nlink,
+        nburnin=run_nburnin,
+        ncores=ncores,
+        pos_in=pos_in,
+        quiet=True,
+    )
+
+    new_thin = out.get_chains(nthin=thin_n, nburnin=run_posterior_burnin, flat=True)
+    combined_thin = new_thin
+    if use_combined:
+        combined_thin = np.vstack([prev_thin, new_thin])
+    samples_for_outputs = combined_thin if use_combined else new_thin
+
+    if write_chains:
+        thinflatchains = combined_thin if use_combined else new_thin
         np.savez(
-            full_chains_file,
-            fullchains=fullchains_to_save,
-            fullneglogl=fullneglogl_to_save,
+            chains_file,
+            thinflatchains=thinflatchains,
             lastpos=out.lastpos,
             nwalkers=out.nwalkers,
             npar=out.npar,
@@ -758,15 +828,37 @@ if write_chains:
             posterior_burnin=effective_total_posterior_burnin,
             thin_n=thin_n,
             nlink=out.nlink,
-            total_combined_nlink=fullchains_to_save.shape[1],
+            total_combined_nlink=combined_total_nlink,
             labels=np.array(labels, dtype=object),
         )
-        print(f"full chains saved: {full_chains_file}")
+        print(f"chains saved: {chains_file}")
+        if save_full_chains:
+            fullchains_to_save = out.fullchains
+            fullneglogl_to_save = out.fullneglogl
+            if extend_chains and prev_fullchains is not None and prev_fullneglogl is not None:
+                if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
+                    fullchains_to_save = np.concatenate([prev_fullchains, out.fullchains], axis=1)
+                    fullneglogl_to_save = np.concatenate([prev_fullneglogl, out.fullneglogl], axis=1)
+            np.savez(
+                full_chains_file,
+                fullchains=fullchains_to_save,
+                fullneglogl=fullneglogl_to_save,
+                lastpos=out.lastpos,
+                nwalkers=out.nwalkers,
+                npar=out.npar,
+                nburnin=out.nburnin,
+                posterior_burnin=effective_total_posterior_burnin,
+                thin_n=thin_n,
+                nlink=out.nlink,
+                total_combined_nlink=fullchains_to_save.shape[1],
+                labels=np.array(labels, dtype=object),
+            )
+            print(f"full chains saved: {full_chains_file}")
 
-combined_fullchains = out.fullchains
-if extend_chains and prev_fullchains is not None:
-    if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
-        combined_fullchains = np.concatenate([prev_fullchains, out.fullchains], axis=1)
+    combined_fullchains = out.fullchains
+    if extend_chains and prev_fullchains is not None:
+        if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
+            combined_fullchains = np.concatenate([prev_fullchains, out.fullchains], axis=1)
 
 gr_metrics, gr_warning = compute_gelmanrubin_from_fullchains(combined_fullchains, effective_total_nburnin, out)
 output_suffix = "_combined" if extend_chains else ""
@@ -904,8 +996,20 @@ for i in range(len(p0)):
     ax = axes1[i]
     ax.plot(trace_x, trace_samples[:, i], ".", alpha=0.2, rasterized=True)
     ax.set_ylabel(labels[i])
-    ylim_pad = 0.05 * (parinfo[i]["limits"][1] - parinfo[i]["limits"][0])
-    ax.set_ylim(parinfo[i]["limits"][0] - ylim_pad, parinfo[i]["limits"][1] + ylim_pad)
+    if all(parinfo[i]["limited"]):
+        ylim_pad = 0.05 * (parinfo[i]["limits"][1] - parinfo[i]["limits"][0])
+        ax.set_ylim(parinfo[i]["limits"][0] - ylim_pad, parinfo[i]["limits"][1] + ylim_pad)
+    else:
+        finite_trace = trace_samples[np.isfinite(trace_samples[:, i]), i]
+        if finite_trace.size > 0:
+            trace_min = np.nanmin(finite_trace)
+            trace_max = np.nanmax(finite_trace)
+            trace_span = trace_max - trace_min
+            if trace_span <= 0.0:
+                ylim_pad = max(1e-6, 0.05 * max(1.0, abs(trace_min)))
+            else:
+                ylim_pad = 0.05 * trace_span
+            ax.set_ylim(trace_min - ylim_pad, trace_max + ylim_pad)
 axes1[-1].set_xlabel("Link number")
 fig1_name = output_dir / f"{planet_name}_{model_name}_trace{output_suffix}.pdf"
 fig1.savefig(fig1_name)
@@ -1024,7 +1128,7 @@ p84 = np.nanpercentile(models, 84.0, axis=0)
 p025 = np.nanpercentile(models, 2.5, axis=0)
 p975 = np.nanpercentile(models, 97.5, axis=0)
 
-font_choice = 'serif'    # change to 'Times New Roman'
+font_choice = 'serif'    # maybe change to 'Times New Roman?'
 label_fontsize = 14      # axis label fontsize
 tick_fontsize = 12       # tick label fontsize
 legend_fontsize = 12     # legend fontsize
@@ -1092,8 +1196,19 @@ if show_lc_binned_points and lc_binned_phase.size > 0:
         zorder=5,
     )
 ax_lc_top.set_xlim(-lc_plot_window, lc_plot_window)
+ax_lc_top.set_ylim(top=1.01)
 ax_lc_top.tick_params(axis='both', labelsize=tick_fontsize)
-ax_lc_top.legend(prop={'size': legend_fontsize, 'family': font_choice}, loc='best')
+ax_lc_top.tick_params(axis='x', labelbottom=False)
+lc_legend_handles = [
+    Line2D([], [], linestyle='None', marker='.', color='k', alpha=lc_raw_alpha, markersize=marker_size, label=lc_raw_label),
+    Line2D([], [], color='red', lw=model_linewidth, label=lc_model_label),
+]
+if show_lc_binned_points and lc_binned_phase.size > 0:
+    lc_legend_handles.append(
+        Line2D([], [], linestyle='None', marker='o', color='k', markerfacecolor='k', markeredgecolor='k',
+               markersize=marker_size, label=lc_binned_label)
+    )
+ax_lc_top.legend(handles=lc_legend_handles, prop={'size': legend_fontsize, 'family': font_choice}, loc='upper right')
 
 ax_lc_bot.errorbar(
     lc_phase,
@@ -1159,6 +1274,7 @@ ax_top.plot(
     label='Median Model'
 )
 ax_top.tick_params(axis='both', labelsize=tick_fontsize)
+ax_top.tick_params(axis='x', labelbottom=False)
 ax_top.legend(prop={'size': legend_fontsize, 'family': font_choice}, loc='best')
 
 # Residuals
