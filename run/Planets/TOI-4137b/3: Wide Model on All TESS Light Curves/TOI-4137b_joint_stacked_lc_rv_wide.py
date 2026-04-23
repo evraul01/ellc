@@ -99,8 +99,8 @@ save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 10
-# nlink = 500
+nlink = 150000
+nlink = 0  # Remake '_combined' outputs
 nburnin = None  # defaults to total combined nlink/10 if None
 ncores = 4
 
