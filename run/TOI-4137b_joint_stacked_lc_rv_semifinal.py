@@ -94,10 +94,6 @@ lc_raw_alpha = 0.025
 lc_raw_label = "Phase-Folded Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
-rv_oversample_model = True
-rv_oversample_nsub = 23
-omit_rv_sorted_indices = [0]  # chronological RV-point indices to omit from the fit
-omitted_rv_alpha = 0.25  # opacity of ommitted RV outliers
 write_chains = True
 extend_chains = True
 save_full_chains = False
@@ -323,28 +319,9 @@ for col in ("ccfjdsum", "ccfrvmod", "dvrms"):
     if col not in rv_df.columns:
         raise ValueError(f"RV CSV missing required column: {col}")
 
-rv_df = rv_df.sort_values("ccfjdsum").reset_index(drop=True)
-rv_time_all = rv_df["ccfjdsum"].values.astype(float)
-rv_data_all = rv_df["ccfrvmod"].values.astype(float)
-rv_err_all = rv_df["dvrms"].values.astype(float)
-if "exptime" in rv_df.columns:
-    rv_exptime_s_all = rv_df["exptime"].values.astype(float)
-else:
-    rv_exptime_s_all = np.zeros_like(rv_time_all)
-
-omit_rv_mask_all = np.zeros_like(rv_time_all, dtype=bool)
-for idx in omit_rv_sorted_indices:
-    if 0 <= idx < len(omit_rv_mask_all):
-        omit_rv_mask_all[idx] = True
-
-rv_time = rv_time_all[~omit_rv_mask_all]
-rv_data = rv_data_all[~omit_rv_mask_all]
-rv_err = rv_err_all[~omit_rv_mask_all]
-rv_exptime_s = rv_exptime_s_all[~omit_rv_mask_all]
-rv_time_omitted = rv_time_all[omit_rv_mask_all]
-rv_data_omitted = rv_data_all[omit_rv_mask_all]
-rv_err_omitted = rv_err_all[omit_rv_mask_all]
-rv_exptime_s_omitted = rv_exptime_s_all[omit_rv_mask_all]
+rv_time = rv_df["ccfjdsum"].values.astype(float)
+rv_data = rv_df["ccfrvmod"].values.astype(float)
+rv_err = rv_df["dvrms"].values.astype(float)
 
 # Derived guesses/limits
 if auto_K_from_data and fit_K:
@@ -376,8 +353,6 @@ if out_of_transit_mask.sum() < 3:
 weights = 1.0 / (rv_err**2)
 gamma_weighted = np.sum(weights[out_of_transit_mask] * rv_data[out_of_transit_mask]) / np.sum(weights[out_of_transit_mask])
 rv_data = rv_data - gamma_weighted
-rv_data_all = rv_data_all - gamma_weighted
-rv_data_omitted = rv_data_omitted - gamma_weighted
 
 
 # %%
@@ -409,22 +384,13 @@ def semi_major_axis_from_a_over_rstar(a_over_rstar):
     return a_over_rstar * stellar_radius_fixed
 
 
-def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K, time_axis, exptime_axis_s=None):
+def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K, time_axis):
     r_1 = 1.0 / a_over_rstar
     r_2 = rp_over_rstar * r_1
     a_orbit = semi_major_axis_from_a_over_rstar(a_over_rstar)
-    eval_time_axis = np.asarray(time_axis, dtype=float)
-    reshape_shape = None
-    if rv_oversample_model and exptime_axis_s is not None and rv_oversample_nsub > 1:
-        exptime_days = np.asarray(exptime_axis_s, dtype=float) / 86400.0
-        exptime_days = np.where(np.isfinite(exptime_days) & (exptime_days > 0.0), exptime_days, 0.0)
-        sub_offsets = np.linspace(-0.5, 0.5, rv_oversample_nsub)
-        eval_time_axis = eval_time_axis[:, None] + exptime_days[:, None] * sub_offsets[None, :]
-        reshape_shape = eval_time_axis.shape
-        eval_time_axis = eval_time_axis.reshape(-1)
 
     rv_call = ellc.rv(
-        eval_time_axis,
+        time_axis,
         t_zero=t0_bjd,
         period=per,
         lambda_1=lambda_deg,
@@ -446,8 +412,6 @@ def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_v
         base = np.asarray(rv_call[0])
     else:
         base = np.asarray(rv_call)
-    if reshape_shape is not None:
-        base = np.nanmean(base.reshape(reshape_shape), axis=1)
 
     if K is None:
         return base
@@ -688,7 +652,7 @@ def loglikelihood_joint(p):
     lc_model = batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, ld_coeffs, lc_time)
     if not np.all(np.isfinite(lc_model)):
         return -np.inf
-    rv_model_vals = rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, rv_time, rv_exptime_s)
+    rv_model_vals = rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, rv_time)
     if not np.all(np.isfinite(rv_model_vals)):
         return -np.inf
 
@@ -1130,15 +1094,13 @@ if med_unpacked is None:
 t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, ld_med = med_unpacked
 
 best_lc = batman_flux(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, ld_med, lc_time)
-best_rv = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_time_all, rv_exptime_s_all)
+best_rv = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_time)
 
 lc_phase = ((lc_time - (t0_bjd_med - 2457000.0)) / per_med + 0.5) % 1.0 - 0.5
-rv_phase_all = ((rv_time_all - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
-rv_phase = rv_phase_all[~omit_rv_mask_all]
-rv_phase_omitted = rv_phase_all[omit_rv_mask_all]
+rv_phase = ((rv_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 
 lc_sort = np.argsort(lc_phase)
-rv_sort = np.argsort(rv_phase_all)
+rv_sort = np.argsort(rv_phase)
 
 # Posterior bands
 all_samples = samples_for_outputs
@@ -1206,7 +1168,7 @@ if show_lc_binned_points:
     lc_binned_residual_err = np.asarray(binned_residual_err)
 
 # RV posterior models
-ntime = len(rv_time_all)
+ntime = len(rv_time)
 models = np.zeros((nsamp, ntime))
 for j, idx in enumerate(sel_idx):
     unpacked = unpack_params(all_samples[idx, :])
@@ -1214,7 +1176,7 @@ for j, idx in enumerate(sel_idx):
         models[j, :] = np.nan
         continue
     t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
-    models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_time_all, rv_exptime_s_all)
+    models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_time)
 
 median_model = np.nanmedian(models, axis=0)
 p16 = np.nanpercentile(models, 16.0, axis=0)
@@ -1342,23 +1304,12 @@ ax_top = fig3.add_subplot(sub[0, 0])
 ax_bot = fig3.add_subplot(sub[1, 0], sharex=ax_top)
 
 # 2-sigma and 1-sigma bands
-ax_top.fill_between(rv_phase_all[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
+ax_top.fill_between(rv_phase[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
                     color='red', alpha=band_alpha_2sig, linewidth=0.0)
-ax_top.fill_between(rv_phase_all[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
+ax_top.fill_between(rv_phase[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
                     color='red', alpha=band_alpha_1sig, linewidth=0.0)
 
 # Data and median model
-if rv_phase_omitted.size > 0:
-    ax_top.errorbar(
-        rv_phase_omitted,
-        rv_data_omitted * 1e3,
-        yerr=rv_err_omitted * 1e3,
-        fmt='o',
-        ms=marker_size,
-        c='k',
-        alpha=omitted_rv_alpha,
-        zorder=4
-    )
 ax_top.errorbar(
     rv_phase,
     rv_data * 1e3,
@@ -1370,7 +1321,7 @@ ax_top.errorbar(
     zorder=5
 )
 ax_top.plot(
-    rv_phase_all[rv_sort],
+    rv_phase[rv_sort],
     median_model[rv_sort] * 1e3,
     '-',
     lw=model_linewidth,
@@ -1383,19 +1334,7 @@ ax_top.tick_params(axis='x', labelbottom=False)
 ax_top.legend(prop={'size': legend_fontsize, 'family': font_choice}, loc='best')
 
 # Residuals
-residuals_ms_all = (rv_data_all - median_model) * 1e3
-residuals_ms = residuals_ms_all[~omit_rv_mask_all]
-residuals_ms_omitted = residuals_ms_all[omit_rv_mask_all]
-if rv_phase_omitted.size > 0:
-    ax_bot.errorbar(
-        rv_phase_omitted,
-        residuals_ms_omitted,
-        yerr=rv_err_omitted * 1e3,
-        fmt='o',
-        ms=marker_size,
-        c='k',
-        alpha=omitted_rv_alpha,
-    )
+residuals_ms = (rv_data - median_model) * 1e3
 ax_bot.errorbar(
     rv_phase,
     residuals_ms,
