@@ -47,7 +47,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_stacked_lc_rv_semifinal"
+model_name = "joint_stacked_lc_rv_no-outlier"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -95,11 +95,9 @@ lc_raw_label = "Phase-Folded Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
 rv_oversample_model = True
-# rv_oversample_model = False
+rv_oversample_model = False
 rv_oversample_nsub = 23
-make_smoothed_rv_plot_from_existing = True
-rv_smooth_npts = 1000
-omit_rv_sorted_indices = []  # chronological RV-point indices to omit from the fit
+omit_rv_sorted_indices = [0]  # chronological RV-point indices to omit from the fit
 omitted_rv_alpha = 0.25  # opacity of ommitted RV outliers
 write_chains = True
 extend_chains = False
@@ -110,7 +108,7 @@ thin_burnin = None
 nlink = 50000
 # nlink = 0  # Remake '_combined' outputs
 nburnin = None  # defaults to total combined nlink/10 if None
-ncores = 12
+ncores = 4
 
 # %%
 # ------------------------------------------------------------
@@ -829,10 +827,9 @@ if extend_chains and chains_file.exists():
             f"Requested burn-in ({effective_total_posterior_burnin}) removes all saved samples from the previous run."
         )
 use_combined = extend_chains and prev_thin is not None
-replot_from_existing = nlink == 0 or make_smoothed_rv_plot_from_existing
-if replot_from_existing:
+if nlink == 0:
     if not chains_file.exists():
-        raise FileNotFoundError(f"Cannot re-plot from existing output because no saved chain file exists: {chains_file}")
+        raise FileNotFoundError(f"Cannot re-plot with nlink=0 because no saved chain file exists: {chains_file}")
     saved = np.load(chains_file, allow_pickle=True)
     if "labels" not in saved:
         raise ValueError(f"Chains file missing 'labels': {chains_file}")
@@ -1037,91 +1034,90 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
 # ------------------------------------------------------------
 # Outputs
 # ------------------------------------------------------------
+plot_samples, plot_labels = filter_constant_plot_columns(*combine_posterior_outputs(samples_for_outputs, labels, include_constant=False))
+summary_samples, summary_labels = combine_posterior_outputs(samples_for_outputs, labels, include_constant=True)
+
 sampled_med = np.median(samples_for_outputs, axis=0)
-if not make_smoothed_rv_plot_from_existing:
-    plot_samples, plot_labels = filter_constant_plot_columns(*combine_posterior_outputs(samples_for_outputs, labels, include_constant=False))
-    summary_samples, summary_labels = combine_posterior_outputs(samples_for_outputs, labels, include_constant=True)
+summary_med = np.median(summary_samples, axis=0)
+summary_p16 = np.nanpercentile(summary_samples, 15.865, axis=0)
+summary_p84 = np.nanpercentile(summary_samples, 84.135, axis=0)
+summary_minus_1sigma = summary_med - summary_p16
+summary_plus_1sigma = summary_p84 - summary_med
+bestfit_df = pd.DataFrame(
+    {
+        "parameter": summary_labels,
+        "median": summary_med,
+        "minus_1sigma": summary_minus_1sigma,
+        "plus_1sigma": summary_plus_1sigma,
+    }
+)
+csv_name = output_dir / f"{planet_name}_{model_name}_bestfit{output_suffix}.csv"
+bestfit_df.to_csv(csv_name, index=False)
+print(f"best-fit csv: {csv_name}")
 
-    summary_med = np.median(summary_samples, axis=0)
-    summary_p16 = np.nanpercentile(summary_samples, 15.865, axis=0)
-    summary_p84 = np.nanpercentile(summary_samples, 84.135, axis=0)
-    summary_minus_1sigma = summary_med - summary_p16
-    summary_plus_1sigma = summary_p84 - summary_med
-    bestfit_df = pd.DataFrame(
-        {
-            "parameter": summary_labels,
-            "median": summary_med,
-            "minus_1sigma": summary_minus_1sigma,
-            "plus_1sigma": summary_plus_1sigma,
-        }
+results_path = output_dir / f"{planet_name}_{model_name}_results{output_suffix}.txt"
+if use_combined and gr_metrics is None:
+    print(f"warning: {gr_warning}")
+    print(f"results skipped: {results_path}")
+else:
+    write_results_txt(
+        results_path,
+        planet_name,
+        model_name,
+        summary_labels,
+        summary_samples,
+        out,
+        lc_csvfiles,
+        rv_csvfile,
+        ncores,
+        len(p0),
+        {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
+        gr_metrics=gr_metrics,
+        gr_warning=gr_warning,
     )
-    csv_name = output_dir / f"{planet_name}_{model_name}_bestfit{output_suffix}.csv"
-    bestfit_df.to_csv(csv_name, index=False)
-    print(f"best-fit csv: {csv_name}")
+    print(f"results written: {results_path}")
 
-    results_path = output_dir / f"{planet_name}_{model_name}_results{output_suffix}.txt"
-    if use_combined and gr_metrics is None:
-        print(f"warning: {gr_warning}")
-        print(f"results skipped: {results_path}")
+trace_x = out.whichlink
+trace_samples = out.flatchains
+if use_combined:
+    trace_samples = samples_for_outputs
+    trace_x = np.arange(trace_samples.shape[0])
+
+fig1, axes1 = plt.subplots(len(p0), figsize=(10, 1 + 2 * len(p0)), sharex=True)
+for i in range(len(p0)):
+    ax = axes1[i]
+    ax.plot(trace_x, trace_samples[:, i], ".", alpha=0.2, rasterized=True)
+    ax.set_ylabel(labels[i])
+    if all(parinfo[i]["limited"]):
+        ylim_pad = 0.05 * (parinfo[i]["limits"][1] - parinfo[i]["limits"][0])
+        ax.set_ylim(parinfo[i]["limits"][0] - ylim_pad, parinfo[i]["limits"][1] + ylim_pad)
     else:
-        write_results_txt(
-            results_path,
-            planet_name,
-            model_name,
-            summary_labels,
-            summary_samples,
-            out,
-            lc_csvfiles,
-            rv_csvfile,
-            ncores,
-            len(p0),
-            {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
-            gr_metrics=gr_metrics,
-            gr_warning=gr_warning,
-        )
-        print(f"results written: {results_path}")
+        finite_trace = trace_samples[np.isfinite(trace_samples[:, i]), i]
+        if finite_trace.size > 0:
+            trace_min = np.nanmin(finite_trace)
+            trace_max = np.nanmax(finite_trace)
+            trace_span = trace_max - trace_min
+            if trace_span <= 0.0:
+                ylim_pad = max(1e-6, 0.05 * max(1.0, abs(trace_min)))
+            else:
+                ylim_pad = 0.05 * trace_span
+            ax.set_ylim(trace_min - ylim_pad, trace_max + ylim_pad)
+axes1[-1].set_xlabel("Link number")
+fig1_name = output_dir / f"{planet_name}_{model_name}_trace{output_suffix}.pdf"
+fig1.savefig(fig1_name)
+plt.close(fig1)
 
-    trace_x = out.whichlink
-    trace_samples = out.flatchains
-    if use_combined:
-        trace_samples = samples_for_outputs
-        trace_x = np.arange(trace_samples.shape[0])
-
-    fig1, axes1 = plt.subplots(len(p0), figsize=(10, 1 + 2 * len(p0)), sharex=True)
-    for i in range(len(p0)):
-        ax = axes1[i]
-        ax.plot(trace_x, trace_samples[:, i], ".", alpha=0.2, rasterized=True)
-        ax.set_ylabel(labels[i])
-        if all(parinfo[i]["limited"]):
-            ylim_pad = 0.05 * (parinfo[i]["limits"][1] - parinfo[i]["limits"][0])
-            ax.set_ylim(parinfo[i]["limits"][0] - ylim_pad, parinfo[i]["limits"][1] + ylim_pad)
-        else:
-            finite_trace = trace_samples[np.isfinite(trace_samples[:, i]), i]
-            if finite_trace.size > 0:
-                trace_min = np.nanmin(finite_trace)
-                trace_max = np.nanmax(finite_trace)
-                trace_span = trace_max - trace_min
-                if trace_span <= 0.0:
-                    ylim_pad = max(1e-6, 0.05 * max(1.0, abs(trace_min)))
-                else:
-                    ylim_pad = 0.05 * trace_span
-                ax.set_ylim(trace_min - ylim_pad, trace_max + ylim_pad)
-    axes1[-1].set_xlabel("Link number")
-    fig1_name = output_dir / f"{planet_name}_{model_name}_trace{output_suffix}.pdf"
-    fig1.savefig(fig1_name)
-    plt.close(fig1)
-
-    plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
-    corner_display_labels = get_plot_display_labels(plot_labels)
-    fig2 = corner.corner(plot_samples, labels=corner_display_labels, label_kwargs={"fontsize": corner_label_fontsize})
-    apply_corner_scalar_formatting(fig2, corner_display_labels, corner_label_fontsize)
-    for ax in fig2.axes:
-        for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
-            if not isinstance(artist, QuadContourSet):
-                artist.set_rasterized(True)
-    fig2_name = output_dir / f"{planet_name}_{model_name}_corner{output_suffix}.pdf"
-    fig2.savefig(fig2_name, bbox_inches='tight', pad_inches=0.3)
-    plt.close(fig2)
+plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
+corner_display_labels = get_plot_display_labels(plot_labels)
+fig2 = corner.corner(plot_samples, labels=corner_display_labels, label_kwargs={"fontsize": corner_label_fontsize})
+apply_corner_scalar_formatting(fig2, corner_display_labels, corner_label_fontsize)
+for ax in fig2.axes:
+    for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
+        if not isinstance(artist, QuadContourSet):
+            artist.set_rasterized(True)
+fig2_name = output_dir / f"{planet_name}_{model_name}_corner{output_suffix}.pdf"
+fig2.savefig(fig2_name, bbox_inches='tight', pad_inches=0.3)
+plt.close(fig2)
 
 
 # %%
@@ -1142,63 +1138,31 @@ rv_phase_all = ((rv_time_all - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 rv_phase = rv_phase_all[~omit_rv_mask_all]
 rv_phase_omitted = rv_phase_all[omit_rv_mask_all]
 
-if make_smoothed_rv_plot_from_existing:
-    rv_model_time = np.linspace(np.nanmin(rv_time_all), np.nanmax(rv_time_all), rv_smooth_npts)
-    rv_model_exptime_s = None
-else:
-    rv_model_time = rv_time_all
-    rv_model_exptime_s = rv_exptime_s_all
-rv_model_phase = ((rv_model_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
-
 lc_sort = np.argsort(lc_phase)
-rv_sort = np.argsort(rv_model_phase)
+rv_sort = np.argsort(rv_phase_all)
 
-if make_smoothed_rv_plot_from_existing:
-    lc_median = best_lc
-    lc_p16 = lc_p84 = lc_p025 = lc_p975 = lc_median
-    median_model = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_model_time, None)
-    median_model_at_data = best_rv
-    p16 = p84 = p025 = p975 = median_model
-else:
-    # Posterior bands
-    all_samples = samples_for_outputs
-    nsamples_total = all_samples.shape[0]
-    nsamp = min(1000, nsamples_total)
-    rng = np.random.default_rng(12345)
-    sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
+# Posterior bands
+all_samples = samples_for_outputs
+nsamples_total = all_samples.shape[0]
+nsamp = min(1000, nsamples_total)
+rng = np.random.default_rng(12345)
+sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
 
-    # LC posterior models
-    lc_models = np.zeros((nsamp, len(lc_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            lc_models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
-        lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
+# LC posterior models
+lc_models = np.zeros((nsamp, len(lc_time)))
+for j, idx in enumerate(sel_idx):
+    unpacked = unpack_params(all_samples[idx, :])
+    if unpacked is None:
+        lc_models[j, :] = np.nan
+        continue
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
+    lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
 
-    lc_median = np.nanmedian(lc_models, axis=0)
-    lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
-    lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
-    lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
-    lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
-
-    # RV posterior models
-    models = np.zeros((nsamp, len(rv_model_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
-        models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_model_time, rv_model_exptime_s)
-
-    median_model = np.nanmedian(models, axis=0)
-    p16 = np.nanpercentile(models, 16.0, axis=0)
-    p84 = np.nanpercentile(models, 84.0, axis=0)
-    p025 = np.nanpercentile(models, 2.5, axis=0)
-    p975 = np.nanpercentile(models, 97.5, axis=0)
-    median_model_at_data = median_model
+lc_median = np.nanmedian(lc_models, axis=0)
+lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
+lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
+lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
+lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
 
 lc_residuals = lc_flux - lc_median
 lc_plot_window = 0.05
@@ -1242,6 +1206,23 @@ if show_lc_binned_points:
     lc_binned_residual = np.asarray(binned_residual)
     lc_binned_residual_err = np.asarray(binned_residual_err)
 
+# RV posterior models
+ntime = len(rv_time_all)
+models = np.zeros((nsamp, ntime))
+for j, idx in enumerate(sel_idx):
+    unpacked = unpack_params(all_samples[idx, :])
+    if unpacked is None:
+        models[j, :] = np.nan
+        continue
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
+    models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_time_all, rv_exptime_s_all)
+
+median_model = np.nanmedian(models, axis=0)
+p16 = np.nanpercentile(models, 16.0, axis=0)
+p84 = np.nanpercentile(models, 84.0, axis=0)
+p025 = np.nanpercentile(models, 2.5, axis=0)
+p975 = np.nanpercentile(models, 97.5, axis=0)
+
 font_choice = 'serif'    # maybe change to 'Times New Roman?'
 label_fontsize = 14      # axis label fontsize
 tick_fontsize = 12       # tick label fontsize
@@ -1259,7 +1240,7 @@ sub_lc = gs[0, 0].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
 ax_lc_top = fig3.add_subplot(sub_lc[0, 0])
 ax_lc_bot = fig3.add_subplot(sub_lc[1, 0], sharex=ax_lc_top)
 
-if show_lc_sigma and not make_smoothed_rv_plot_from_existing:
+if show_lc_sigma:
     ax_lc_top.fill_between(
         lc_phase[lc_sort],
         lc_p025[lc_sort],
@@ -1362,11 +1343,10 @@ ax_top = fig3.add_subplot(sub[0, 0])
 ax_bot = fig3.add_subplot(sub[1, 0], sharex=ax_top)
 
 # 2-sigma and 1-sigma bands
-if not make_smoothed_rv_plot_from_existing:
-    ax_top.fill_between(rv_model_phase[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_2sig, linewidth=0.0)
-    ax_top.fill_between(rv_model_phase[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_1sig, linewidth=0.0)
+ax_top.fill_between(rv_phase_all[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
+                    color='red', alpha=band_alpha_2sig, linewidth=0.0)
+ax_top.fill_between(rv_phase_all[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
+                    color='red', alpha=band_alpha_1sig, linewidth=0.0)
 
 # Data and median model
 if rv_phase_omitted.size > 0:
@@ -1391,7 +1371,7 @@ ax_top.errorbar(
     zorder=5
 )
 ax_top.plot(
-    rv_model_phase[rv_sort],
+    rv_phase_all[rv_sort],
     median_model[rv_sort] * 1e3,
     '-',
     lw=model_linewidth,
@@ -1404,7 +1384,7 @@ ax_top.tick_params(axis='x', labelbottom=False)
 ax_top.legend(prop={'size': legend_fontsize, 'family': font_choice}, loc='best')
 
 # Residuals
-residuals_ms_all = (rv_data_all - median_model_at_data) * 1e3
+residuals_ms_all = (rv_data_all - median_model) * 1e3
 residuals_ms = residuals_ms_all[~omit_rv_mask_all]
 residuals_ms_omitted = residuals_ms_all[omit_rv_mask_all]
 if rv_phase_omitted.size > 0:
@@ -1441,7 +1421,6 @@ fig3.text(0.5, 0.5, 'Radial velocity (m/s)', va='center', rotation='vertical',
 
 
 fig3.tight_layout(rect=[0.02, 0.02, 1, 0.98])
-smooth_output_suffix = "_smoothed" if make_smoothed_rv_plot_from_existing else ""
-fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side{output_suffix}{smooth_output_suffix}.pdf"
+fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side{output_suffix}.pdf"
 fig3.savefig(fig3_name)
 plt.close(fig3)

@@ -47,7 +47,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_stacked_lc_rv_semifinal"
+model_name = "joint_stacked_lc_rv_fixed-a"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -95,9 +95,9 @@ lc_raw_label = "Phase-Folded Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
 rv_oversample_model = True
-# rv_oversample_model = False
+rv_oversample_model = False
 rv_oversample_nsub = 23
-make_smoothed_rv_plot_from_existing = True
+make_smoothed_rv_plot_from_existing = False
 rv_smooth_npts = 1000
 omit_rv_sorted_indices = []  # chronological RV-point indices to omit from the fit
 omitted_rv_alpha = 0.25  # opacity of ommitted RV outliers
@@ -110,7 +110,7 @@ thin_burnin = None
 nlink = 50000
 # nlink = 0  # Remake '_combined' outputs
 nburnin = None  # defaults to total combined nlink/10 if None
-ncores = 12
+ncores = 4
 
 # %%
 # ------------------------------------------------------------
@@ -415,7 +415,7 @@ def semi_major_axis_from_a_over_rstar(a_over_rstar):
 def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K, time_axis, exptime_axis_s=None):
     r_1 = 1.0 / a_over_rstar
     r_2 = rp_over_rstar * r_1
-    a_orbit = semi_major_axis_from_a_over_rstar(a_over_rstar)
+    a_orbit = a_over_rstar
     eval_time_axis = np.asarray(time_axis, dtype=float)
     reshape_shape = None
     if rv_oversample_model and exptime_axis_s is not None and rv_oversample_nsub > 1:
@@ -1153,52 +1153,28 @@ rv_model_phase = ((rv_model_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 lc_sort = np.argsort(lc_phase)
 rv_sort = np.argsort(rv_model_phase)
 
-if make_smoothed_rv_plot_from_existing:
-    lc_median = best_lc
-    lc_p16 = lc_p84 = lc_p025 = lc_p975 = lc_median
-    median_model = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_model_time, None)
-    median_model_at_data = best_rv
-    p16 = p84 = p025 = p975 = median_model
-else:
-    # Posterior bands
-    all_samples = samples_for_outputs
-    nsamples_total = all_samples.shape[0]
-    nsamp = min(1000, nsamples_total)
-    rng = np.random.default_rng(12345)
-    sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
+# Posterior bands
+all_samples = samples_for_outputs
+nsamples_total = all_samples.shape[0]
+nsamp = min(1000, nsamples_total)
+rng = np.random.default_rng(12345)
+sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
 
-    # LC posterior models
-    lc_models = np.zeros((nsamp, len(lc_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            lc_models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
-        lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
+# LC posterior models
+lc_models = np.zeros((nsamp, len(lc_time)))
+for j, idx in enumerate(sel_idx):
+    unpacked = unpack_params(all_samples[idx, :])
+    if unpacked is None:
+        lc_models[j, :] = np.nan
+        continue
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
+    lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
 
-    lc_median = np.nanmedian(lc_models, axis=0)
-    lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
-    lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
-    lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
-    lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
-
-    # RV posterior models
-    models = np.zeros((nsamp, len(rv_model_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
-        models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_model_time, rv_model_exptime_s)
-
-    median_model = np.nanmedian(models, axis=0)
-    p16 = np.nanpercentile(models, 16.0, axis=0)
-    p84 = np.nanpercentile(models, 84.0, axis=0)
-    p025 = np.nanpercentile(models, 2.5, axis=0)
-    p975 = np.nanpercentile(models, 97.5, axis=0)
-    median_model_at_data = median_model
+lc_median = np.nanmedian(lc_models, axis=0)
+lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
+lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
+lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
+lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
 
 lc_residuals = lc_flux - lc_median
 lc_plot_window = 0.05
@@ -1242,6 +1218,29 @@ if show_lc_binned_points:
     lc_binned_residual = np.asarray(binned_residual)
     lc_binned_residual_err = np.asarray(binned_residual_err)
 
+# RV posterior models
+ntime = len(rv_model_time)
+models = np.zeros((nsamp, ntime))
+models_at_data = np.zeros((nsamp, len(rv_time_all))) if make_smoothed_rv_plot_from_existing else None
+for j, idx in enumerate(sel_idx):
+    unpacked = unpack_params(all_samples[idx, :])
+    if unpacked is None:
+        models[j, :] = np.nan
+        if models_at_data is not None:
+            models_at_data[j, :] = np.nan
+        continue
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
+    models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_model_time, rv_model_exptime_s)
+    if models_at_data is not None:
+        models_at_data[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_time_all, rv_exptime_s_all)
+
+median_model = np.nanmedian(models, axis=0)
+p16 = np.nanpercentile(models, 16.0, axis=0)
+p84 = np.nanpercentile(models, 84.0, axis=0)
+p025 = np.nanpercentile(models, 2.5, axis=0)
+p975 = np.nanpercentile(models, 97.5, axis=0)
+median_model_at_data = np.nanmedian(models_at_data, axis=0) if models_at_data is not None else median_model
+
 font_choice = 'serif'    # maybe change to 'Times New Roman?'
 label_fontsize = 14      # axis label fontsize
 tick_fontsize = 12       # tick label fontsize
@@ -1259,7 +1258,7 @@ sub_lc = gs[0, 0].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
 ax_lc_top = fig3.add_subplot(sub_lc[0, 0])
 ax_lc_bot = fig3.add_subplot(sub_lc[1, 0], sharex=ax_lc_top)
 
-if show_lc_sigma and not make_smoothed_rv_plot_from_existing:
+if show_lc_sigma:
     ax_lc_top.fill_between(
         lc_phase[lc_sort],
         lc_p025[lc_sort],
@@ -1362,11 +1361,10 @@ ax_top = fig3.add_subplot(sub[0, 0])
 ax_bot = fig3.add_subplot(sub[1, 0], sharex=ax_top)
 
 # 2-sigma and 1-sigma bands
-if not make_smoothed_rv_plot_from_existing:
-    ax_top.fill_between(rv_model_phase[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_2sig, linewidth=0.0)
-    ax_top.fill_between(rv_model_phase[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_1sig, linewidth=0.0)
+ax_top.fill_between(rv_model_phase[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
+                    color='red', alpha=band_alpha_2sig, linewidth=0.0)
+ax_top.fill_between(rv_model_phase[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
+                    color='red', alpha=band_alpha_1sig, linewidth=0.0)
 
 # Data and median model
 if rv_phase_omitted.size > 0:

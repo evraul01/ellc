@@ -12,32 +12,14 @@ import numpy as np
 import pandas as pd
 from matplotlib.contour import QuadContourSet
 from matplotlib.lines import Line2D
-from matplotlib.ticker import ScalarFormatter
 
 
-def _bootstrap_paths(start_path: Path) -> None:
-    for candidate in [start_path, *start_path.parents]:
-        run_candidate = candidate if (candidate / "edmcmc.py").exists() else candidate / "run"
-        if (run_candidate / "edmcmc.py").exists():
-            repo_candidate = run_candidate.parent
-            if str(run_candidate) not in sys.path:
-                sys.path.insert(0, str(run_candidate))
-            if str(repo_candidate) not in sys.path:
-                sys.path.insert(0, str(repo_candidate))
-            return
-
-
-def _find_run_dir(start_path: Path) -> Path:
-    for candidate in [start_path, *start_path.parents]:
-        if (candidate / "data").is_dir() and (candidate / "edmcmc.py").exists():
-            return candidate
-        run_candidate = candidate / "run"
-        if (run_candidate / "data").is_dir() and (run_candidate / "edmcmc.py").exists():
-            return run_candidate
-    raise FileNotFoundError("Could not find the run/ directory containing data/ and edmcmc.py")
-
-
-_bootstrap_paths(Path(__file__).resolve().parent)
+run_dir = Path("/home/eraul/wisconsin/work/exoplanets_dynamics_research_2025/ellc/run")
+repo_dir = run_dir.parent
+if str(run_dir) not in sys.path:
+    sys.path.insert(0, str(run_dir))
+if str(repo_dir) not in sys.path:
+    sys.path.insert(0, str(repo_dir))
 import edmcmc as edm
 import ellc
 
@@ -47,7 +29,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_stacked_lc_rv_semifinal"
+model_name = "joint_stacked_lc_rv" # CHANGE THIS<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -76,7 +58,6 @@ fit_K = True
 fit_ld = True
 fit_period = True
 
-
 report_K_in_m_per_s = True
 include_derived_rho_star = True
 include_derived_inclination = True
@@ -86,7 +67,6 @@ include_derived_semi_major_axis = True
 R_SUN_TO_R_EARTH = 109.076
 R_SUN_TO_AU = 0.00465047
 
-corner_label_fontsize = 18
 show_lc_sigma = True
 show_lc_binned_points = True
 lc_phase_bin_width = 0.0025
@@ -94,21 +74,14 @@ lc_raw_alpha = 0.025
 lc_raw_label = "Phase-Folded Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
-rv_oversample_model = True
-# rv_oversample_model = False
+rv_oversample_model = False
 rv_oversample_nsub = 23
-make_smoothed_rv_plot_from_existing = True
-rv_smooth_npts = 1000
-omit_rv_sorted_indices = []  # chronological RV-point indices to omit from the fit
+omit_rv_sorted_indices = [0]  # chronological RV-point indices to omit from the fit
 omitted_rv_alpha = 0.25  # opacity of ommitted RV outliers
 write_chains = True
-extend_chains = False
-save_full_chains = False
 thin_n = 5
-thin_burnin = None
 
 nlink = 50000
-# nlink = 0  # Remake '_combined' outputs
 nburnin = None  # defaults to total combined nlink/10 if None
 ncores = 12
 
@@ -163,27 +136,6 @@ param_config = {
     "vsini": {"guess": vsini_guess, "wid": 0.2, "prior": vsini_lims},
     "lambda": {"guess": lambda_guess, "wid": 1.0, "prior": lambda_lims},
     "K": {"guess": K_guess, "wid": 0.05, "prior": K_lims},
-}
-
-corner_label_map = {
-    "t0_bjd": r"$t_0$ (BJD)",
-    "period_d": r"$P$ (d)",
-    "rp_over_rstar": r"$R_{\rm p}/R_\star$",
-    "a_over_rstar": r"$a/R_\star$",
-    "impact_b": r"$b$",
-    "inc_deg": r"$i$ ($^\circ$)",
-    "sqrt_e_cosw": r"$\sqrt{e}\cos\omega_\star$",
-    "sqrt_e_sinw": r"$\sqrt{e}\sin\omega_\star$",
-    "vsini": r"$v \sin i_\star$ (km s$^{-1}$)",
-    "lambda": r"$\lambda$ ($^\circ$)",
-    "K": r"$K$ (km s$^{-1}$)",
-    "K_m_s": r"$K$ (m s$^{-1}$)",
-    "ld_u1": r"$u_1$",
-    "ld_u2": r"$u_2$",
-    "rho_star_g_cm3": r"$\rho_\star$ (g cm$^{-3}$)",
-    "incl_deg_derived": r"$i$ ($^\circ$)",
-    "planet_radius_rearth": r"$R_{\rm p}$ ($R_\oplus$)",
-    "semi_major_axis_au": r"$a$ (au)",
 }
 
 for i, u in enumerate(ld_u):
@@ -257,7 +209,6 @@ def evaluate_sampled_log_prior(p, labels):
 # ------------------------------------------------------------
 # IO setup
 # ------------------------------------------------------------
-run_dir = _find_run_dir(Path(__file__).resolve().parent)
 lc_csvfiles = [
     run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0019.csv",
     run_dir / "data" / planet_name / "TOI-4137b_lightcurve_hlsp_tess-spoc_tess_phot_0000000417646390-s0026.csv",
@@ -273,12 +224,6 @@ rv_csvfile = run_dir / "data" / planet_name / "2026Jan14_TIC417646390.csv"
 output_dir = run_dir / "edmcmc_output" / planet_name
 output_dir.mkdir(parents=True, exist_ok=True)
 chains_file = output_dir / f"{planet_name}_{model_name}_chains.npz"
-full_chains_file = output_dir / f"{planet_name}_{model_name}_chains_full.npz"
-
-print(f"run_dir: {run_dir}")
-print(f"lc_csvfiles: {lc_csvfiles}")
-print(f"rv_csvfile: {rv_csvfile}")
-print(f"output_dir: {output_dir}")
 
 
 # %%
@@ -522,62 +467,6 @@ def transform_output_samples(samples, labels):
     return transformed_samples, transformed_labels
 
 
-def get_plot_display_labels(labels):
-    return [corner_label_map.get(label, label) for label in labels]
-
-
-def _make_corner_scalar_formatter():
-    formatter = ScalarFormatter(useMathText=True)
-    formatter.set_scientific(True)
-    formatter.set_powerlimits((-3, 3))
-    formatter.set_useOffset(True)
-    return formatter
-
-
-def _merge_offset_into_label(label_text, offset_text):
-    if not offset_text:
-        return label_text
-    if " (" in label_text and label_text.endswith(")"):
-        main_text, unit_text = label_text.rsplit(" (", 1)
-        unit_text = unit_text[:-1].strip()
-        if "BJD" in unit_text:
-            return f"{main_text}\n({unit_text}{offset_text})"
-        if unit_text:
-            return f"{main_text} ({unit_text}{offset_text})"
-        return f"{main_text} ({offset_text})"
-    return f"{label_text}\n[{offset_text}]"
-
-
-def apply_corner_scalar_formatting(fig, display_labels, label_fontsize):
-    ndim = len(display_labels)
-    if ndim == 0:
-        return
-
-    axes = np.array(fig.axes).reshape((ndim, ndim))
-    for row in range(ndim):
-        for col in range(ndim):
-            ax = axes[row, col]
-            ax.xaxis.set_major_formatter(_make_corner_scalar_formatter())
-            if row > col:
-                ax.yaxis.set_major_formatter(_make_corner_scalar_formatter())
-
-    fig.canvas.draw()
-
-    for col in range(ndim):
-        ax = axes[-1, col]
-        x_offset = ax.xaxis.get_offset_text().get_text().strip()
-        if x_offset:
-            ax.set_xlabel(_merge_offset_into_label(display_labels[col], x_offset), fontsize=label_fontsize, labelpad=12)
-            ax.xaxis.get_offset_text().set_visible(False)
-
-    for row in range(1, ndim):
-        ax = axes[row, 0]
-        y_offset = ax.yaxis.get_offset_text().get_text().strip()
-        if y_offset:
-            ax.set_ylabel(_merge_offset_into_label(display_labels[row], y_offset), fontsize=label_fontsize, labelpad=12)
-            ax.yaxis.get_offset_text().set_visible(False)
-
-
 def combine_posterior_outputs(base_samples, base_labels, include_constant=False):
     derived_samples, derived_labels = build_derived_posterior_samples(base_samples, include_constant=include_constant)
     combined_samples = base_samples
@@ -714,414 +603,98 @@ def loglikelihood_joint(p):
 # ------------------------------------------------------------
 labels, p0, wid, parinfo = build_param_setup()
 
-def flatten_fullchains_for_posterior(fullchains, burnin, nthin):
-    nwalkers_saved, nlink_saved, npar_saved = fullchains.shape
-    if burnin >= nlink_saved:
-        return np.empty((0, npar_saved))
-    indices = burnin + np.arange(np.floor((nlink_saved - burnin) / nthin)) * nthin
-    indices = indices.astype(int)
-    return fullchains[:, indices, :].reshape(-1, npar_saved)
+run_nburnin = int(nlink / 10) if nburnin is None else nburnin
+posterior_burnin = int(nlink / 10) if nburnin is None else nburnin
 
-def approximate_thinflatchains_for_posterior(thinflatchains, saved_nlink, saved_posterior_burnin, requested_posterior_burnin, saved_thin_n):
-    if requested_posterior_burnin <= saved_posterior_burnin:
-        return thinflatchains
-    saved_kept_perwalker = int(np.floor((saved_nlink - saved_posterior_burnin) / saved_thin_n))
-    if saved_kept_perwalker <= 0:
-        return np.empty((0, thinflatchains.shape[1]))
-    drop_perwalker = int(np.ceil((requested_posterior_burnin - saved_posterior_burnin) / saved_thin_n))
-    drop_perwalker = max(0, min(drop_perwalker, saved_kept_perwalker))
-    drop_fraction = drop_perwalker / float(saved_kept_perwalker)
-    n_drop = int(np.floor(thinflatchains.shape[0] * drop_fraction))
-    return thinflatchains[n_drop:, :]
+out = edm.edmcmc(
+    loglikelihood_joint,
+    p0,
+    wid,
+    parinfo=parinfo,
+    nwalkers=100,
+    nlink=nlink,
+    nburnin=run_nburnin,
+    ncores=ncores,
+    quiet=True,
+)
 
-def compute_gelmanrubin_from_fullchains(fullchains, burnin, out):
-    if fullchains is None:
-        return None, "Combined Gelman-Rubin unavailable because previous full chains are not available."
-    cutchains = fullchains[:, burnin:, :]
-    if cutchains.shape[1] < 2:
-        return None, f"Combined Gelman-Rubin unavailable because only {cutchains.shape[1]} post-burn-in links remain per walker."
-    grstats = np.zeros(cutchains.shape[2])
-    for i in range(cutchains.shape[2]):
-        grstats[i] = out.onegelmanrubin(cutchains[:, :, i])
-    return grstats, None
+samples_for_outputs = out.get_chains(nthin=thin_n, nburnin=posterior_burnin, flat=True)
 
-
-class SavedChainReplay:
-    def __init__(self, thin_samples, nwalkers, npar, nlink, nburnin, fullchains=None, fullneglogl=None):
-        self.flatchains = thin_samples
-        self.nwalkers = nwalkers
-        self.npar = npar
-        self.nlink = nlink
-        self.nburnin = nburnin
-        self.fullchains = fullchains
-        self.fullneglogl = fullneglogl
-        if fullchains is not None:
-            post_burn = fullchains[:, nburnin:nlink, :]
-            npost = post_burn.shape[1]
-            self.flatchains = post_burn.reshape(nwalkers * npost, npar)
-            self.whichlink = np.tile(np.arange(nburnin, nlink), nwalkers)
-        else:
-            self.whichlink = np.arange(self.flatchains.shape[0])
-
-    def onegelmanrubin(self, chain):
-        ssq = np.var(chain, axis=1, ddof=1)
-        W = np.mean(ssq, axis=0)
-        thetab = np.mean(chain, axis=1)
-        thetabb = np.mean(thetab, axis=0)
-        m = chain.shape[0]
-        n = chain.shape[1]
-        B = n / (m - 1) * np.sum((thetabb - thetab)**2, axis=0)
-        var_theta = (n - 1) / n * W + 1 / n * B
-        return np.sqrt(var_theta / W)
-
-prev_thin = None
-pos_in = None
-prev_total_nlink = 0
-prev_fullchains = None
-prev_fullneglogl = None
-if extend_chains and chains_file.exists():
-    data = np.load(chains_file, allow_pickle=True)
-    if "labels" not in data:
-        raise ValueError(f"Chains file missing 'labels': {chains_file}")
-    if list(data["labels"]) != list(labels):
-        raise ValueError("Chains file labels do not match current parameter labels; refusing to extend.")
-    if "lastpos" not in data:
-        raise ValueError(f"Chains file missing 'lastpos': {chains_file}")
-    pos_in = data["lastpos"]
-    prev_total_nlink = int(data["total_combined_nlink"]) if "total_combined_nlink" in data else int(data["nlink"])
-
-combined_total_nlink = prev_total_nlink + nlink
-effective_total_nburnin = int(combined_total_nlink / 10) if nburnin is None else nburnin
-effective_total_posterior_burnin = int(combined_total_nlink / 10) if thin_burnin is None else thin_burnin
-run_nburnin = min(nlink, max(0, effective_total_nburnin - prev_total_nlink))
-run_posterior_burnin = min(nlink, max(0, effective_total_posterior_burnin - prev_total_nlink))
-
-if extend_chains and chains_file.exists():
-    if full_chains_file.exists():
-        full_data = np.load(full_chains_file, allow_pickle=True)
-        if "labels" not in full_data:
-            raise ValueError(f"Full chain file missing 'labels': {full_chains_file}")
-        if list(full_data["labels"]) != list(labels):
-            raise ValueError("Full chain file labels do not match current parameter labels; refusing to extend.")
-        if "fullchains" not in full_data:
-            raise ValueError(f"Full chain file missing 'fullchains': {full_chains_file}")
-        full_total_nlink = int(full_data["total_combined_nlink"]) if "total_combined_nlink" in full_data else full_data["fullchains"].shape[1]
-        if full_total_nlink == prev_total_nlink:
-            prev_fullchains = full_data["fullchains"]
-            if "fullneglogl" in full_data:
-                prev_fullneglogl = full_data["fullneglogl"]
-            prev_thin = flatten_fullchains_for_posterior(prev_fullchains, effective_total_posterior_burnin, thin_n)
-    if prev_thin is None:
-        if "thinflatchains" not in data:
-            raise ValueError(f"Chains file missing 'thinflatchains': {chains_file}")
-        saved_posterior_burnin = int(data["posterior_burnin"]) if "posterior_burnin" in data else int(data["nburnin"])
-        saved_thin_n = int(data["thin_n"]) if "thin_n" in data else thin_n
-        saved_nlink = prev_total_nlink
-        prev_thin = approximate_thinflatchains_for_posterior(
-            data["thinflatchains"],
-            saved_nlink,
-            saved_posterior_burnin,
-            effective_total_posterior_burnin,
-            saved_thin_n,
-        )
-    if prev_thin.size == 0:
-        raise ValueError(
-            f"Requested burn-in ({effective_total_posterior_burnin}) removes all saved samples from the previous run."
-        )
-use_combined = extend_chains and prev_thin is not None
-replot_from_existing = nlink == 0 or make_smoothed_rv_plot_from_existing
-if replot_from_existing:
-    if not chains_file.exists():
-        raise FileNotFoundError(f"Cannot re-plot from existing output because no saved chain file exists: {chains_file}")
-    saved = np.load(chains_file, allow_pickle=True)
-    if "labels" not in saved:
-        raise ValueError(f"Chains file missing 'labels': {chains_file}")
-    if list(saved["labels"]) != list(labels):
-        raise ValueError("Saved chain labels do not match current parameter labels; refusing to re-plot.")
-    if "thinflatchains" not in saved:
-        raise ValueError(f"Chains file missing 'thinflatchains': {chains_file}")
-
-    saved_total_nlink = int(saved["total_combined_nlink"]) if "total_combined_nlink" in saved else int(saved["nlink"])
-    saved_posterior_burnin = int(saved["posterior_burnin"]) if "posterior_burnin" in saved else int(saved["nburnin"])
-    saved_thin_n = int(saved["thin_n"]) if "thin_n" in saved else thin_n
-
-    combined_total_nlink = saved_total_nlink
-    effective_total_nburnin = int(combined_total_nlink / 10) if nburnin is None else nburnin
-    effective_total_posterior_burnin = int(combined_total_nlink / 10) if thin_burnin is None else thin_burnin
-
-    combined_fullchains = None
-    combined_fullneglogl = None
-    if full_chains_file.exists():
-        full_saved = np.load(full_chains_file, allow_pickle=True)
-        if "labels" not in full_saved:
-            raise ValueError(f"Full chain file missing 'labels': {full_chains_file}")
-        if list(full_saved["labels"]) != list(labels):
-            raise ValueError("Saved full-chain labels do not match current parameter labels; refusing to re-plot.")
-        if "fullchains" not in full_saved:
-            raise ValueError(f"Full chain file missing 'fullchains': {full_chains_file}")
-        combined_fullchains = full_saved["fullchains"]
-        if "fullneglogl" in full_saved:
-            combined_fullneglogl = full_saved["fullneglogl"]
-
-    if combined_fullchains is not None:
-        samples_for_outputs = flatten_fullchains_for_posterior(
-            combined_fullchains,
-            effective_total_posterior_burnin,
-            thin_n,
-        )
-    else:
-        samples_for_outputs = approximate_thinflatchains_for_posterior(
-            saved["thinflatchains"],
-            saved_total_nlink,
-            saved_posterior_burnin,
-            effective_total_posterior_burnin,
-            saved_thin_n,
-        )
-    if samples_for_outputs.size == 0:
-        raise ValueError("Requested posterior burn-in removes all saved samples; nothing left to re-plot.")
-
-    out = SavedChainReplay(
-        thin_samples=samples_for_outputs,
-        nwalkers=int(saved["nwalkers"]),
-        npar=int(saved["npar"]),
-        nlink=combined_total_nlink,
-        nburnin=effective_total_nburnin,
-        fullchains=combined_fullchains,
-        fullneglogl=combined_fullneglogl,
-    )
-else:
-    out = edm.edmcmc(
-        loglikelihood_joint,
-        p0,
-        wid,
-        parinfo=parinfo,
-        nwalkers=100,
-        nlink=nlink,
-        nburnin=run_nburnin,
-        ncores=ncores,
-        pos_in=pos_in,
-        quiet=True,
+if write_chains:
+    np.savez(
+        chains_file,
+        thinflatchains=samples_for_outputs,
+        lastpos=out.lastpos,
+        nwalkers=out.nwalkers,
+        npar=out.npar,
+        nburnin=out.nburnin,
+        thin_n=thin_n,
+        nlink=out.nlink,
+        labels=np.array(labels, dtype=object),
     )
 
-    new_thin = out.get_chains(nthin=thin_n, nburnin=run_posterior_burnin, flat=True)
-    combined_thin = new_thin
-    if use_combined:
-        combined_thin = np.vstack([prev_thin, new_thin])
-    samples_for_outputs = combined_thin if use_combined else new_thin
 
-    if write_chains:
-        thinflatchains = combined_thin if use_combined else new_thin
-        np.savez(
-            chains_file,
-            thinflatchains=thinflatchains,
-            lastpos=out.lastpos,
-            nwalkers=out.nwalkers,
-            npar=out.npar,
-            nburnin=out.nburnin,
-            posterior_burnin=effective_total_posterior_burnin,
-            thin_n=thin_n,
-            nlink=out.nlink,
-            total_combined_nlink=combined_total_nlink,
-            labels=np.array(labels, dtype=object),
-        )
-        print(f"chains saved: {chains_file}")
-        if save_full_chains:
-            fullchains_to_save = out.fullchains
-            fullneglogl_to_save = out.fullneglogl
-            if extend_chains and prev_fullchains is not None and prev_fullneglogl is not None:
-                if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
-                    fullchains_to_save = np.concatenate([prev_fullchains, out.fullchains], axis=1)
-                    fullneglogl_to_save = np.concatenate([prev_fullneglogl, out.fullneglogl], axis=1)
-            np.savez(
-                full_chains_file,
-                fullchains=fullchains_to_save,
-                fullneglogl=fullneglogl_to_save,
-                lastpos=out.lastpos,
-                nwalkers=out.nwalkers,
-                npar=out.npar,
-                nburnin=out.nburnin,
-                posterior_burnin=effective_total_posterior_burnin,
-                thin_n=thin_n,
-                nlink=out.nlink,
-                total_combined_nlink=fullchains_to_save.shape[1],
-                labels=np.array(labels, dtype=object),
-            )
-            print(f"full chains saved: {full_chains_file}")
-
-    combined_fullchains = out.fullchains
-    if extend_chains and prev_fullchains is not None:
-        if prev_fullchains.shape[0] == out.fullchains.shape[0] and prev_fullchains.shape[2] == out.fullchains.shape[2]:
-            combined_fullchains = np.concatenate([prev_fullchains, out.fullchains], axis=1)
-
-gr_metrics, gr_warning = compute_gelmanrubin_from_fullchains(combined_fullchains, effective_total_nburnin, out)
-output_suffix = "_combined" if use_combined else ""
-
-
-# %%
-# ------------------------------------------------------------
-# Results.txt Function
-# ------------------------------------------------------------
-def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files, rv_file, ncores, n_fit_params, fit_flags, gr_metrics=None, gr_warning=None):
-    header = [
-        "***************************************",
-        "#######################################",
-        "######                           ######",
-        "###### TOI-4137b Retrieval Output ######",
-        "######                           ######",
-        "#######################################",
-        "***************************************",
-        "",
-        "#################################",
-        f"PLANET: {planet_name}",
-        f"Model: {model_name}",
-        "#################################",
-        "",
-        "Datasets:",
-    ]
-
-    header += [f"-> LC: {Path(f).name}" for f in lc_files]
-    header += [f"-> RV: {Path(rv_file).name}"]
-
-    header += [
-        "",
-        "#################################",
-        "Algorithm = EDMCMC",
-        f"N_params = {n_fit_params}",
-        f"N_reported = {len(labels)}",
-        f"N_walkers = {out.nwalkers}",
-        f"N_link = {out.nlink}",
-        f"N_burnin = {out.nburnin}",
-        f"N_cores = {ncores}",
-        "",
-        "Model flags:",
-        f"-> fit_b = {fit_flags['fit_b']}",
-        f"-> fit_e = {fit_flags['fit_e']}",
-        f"-> fit_K = {fit_flags['fit_K']}",
-        f"-> fit_ld = {fit_flags['fit_ld']}",
-        "",
-        "#################################",
-        "Gelman-Rubin statistics:",
-    ]
-
-    if gr_metrics is not None:
-        for i in range(len(gr_metrics)):
-            header.append(f"Parameter {i+1} ({labels[i]}) has a Gelman-Rubin statistic of {gr_metrics[i]}")
-    elif gr_warning is not None:
-        header.append(f"WARNING: {gr_warning}")
-
-    def write_sigma_block(fh, title, p_lo, p_hi):
-        fh.write("\n******************************************\n")
-        fh.write(f"{title} constraints\n")
-        fh.write("******************************************\n")
-        for i, name in enumerate(labels):
-            s = samples[:, i]
-            med = float(np.nanmedian(s))
-            lo = float(np.nanpercentile(s, p_lo))
-            hi = float(np.nanpercentile(s, p_hi))
-            fh.write(f"{name:<15} = {med: .6g} (+{hi - med:.6g}) (-{med - lo:.6g})\n")
-
-    with open(path, "w") as f:
-        f.write("\n".join(header))
-        write_sigma_block(f, "1 σ", 15.865, 84.135)
-        write_sigma_block(f, "2 σ", 2.5, 97.5)
-        write_sigma_block(f, "3 σ", 0.135, 99.865)
-        write_sigma_block(f, "5 σ", 0.000057, 99.999943)
-
-        f.write("\n******************************************\n")
-        f.write("Best-fitting parameters\n")
-        f.write("******************************************\n")
-        best = np.nanmedian(samples, axis=0)
-        for i, name in enumerate(labels):
-            f.write(f"{name:<15} = {best[i]: .6g}\n")
 # %%
 # ------------------------------------------------------------
 # Outputs
 # ------------------------------------------------------------
+plot_samples, plot_labels = filter_constant_plot_columns(*combine_posterior_outputs(samples_for_outputs, labels, include_constant=False))
+summary_samples, summary_labels = combine_posterior_outputs(samples_for_outputs, labels, include_constant=True)
+
 sampled_med = np.median(samples_for_outputs, axis=0)
-if not make_smoothed_rv_plot_from_existing:
-    plot_samples, plot_labels = filter_constant_plot_columns(*combine_posterior_outputs(samples_for_outputs, labels, include_constant=False))
-    summary_samples, summary_labels = combine_posterior_outputs(samples_for_outputs, labels, include_constant=True)
+summary_med = np.median(summary_samples, axis=0)
+summary_p16 = np.nanpercentile(summary_samples, 15.865, axis=0)
+summary_p84 = np.nanpercentile(summary_samples, 84.135, axis=0)
+summary_minus_1sigma = summary_med - summary_p16
+summary_plus_1sigma = summary_p84 - summary_med
+bestfit_df = pd.DataFrame(
+    {
+        "parameter": summary_labels,
+        "median": summary_med,
+        "minus_1sigma": summary_minus_1sigma,
+        "plus_1sigma": summary_plus_1sigma,
+    }
+)
+csv_name = output_dir / f"{planet_name}_{model_name}_bestfit.csv"
+bestfit_df.to_csv(csv_name, index=False)
+print(f"best-fit csv: {csv_name}")
 
-    summary_med = np.median(summary_samples, axis=0)
-    summary_p16 = np.nanpercentile(summary_samples, 15.865, axis=0)
-    summary_p84 = np.nanpercentile(summary_samples, 84.135, axis=0)
-    summary_minus_1sigma = summary_med - summary_p16
-    summary_plus_1sigma = summary_p84 - summary_med
-    bestfit_df = pd.DataFrame(
-        {
-            "parameter": summary_labels,
-            "median": summary_med,
-            "minus_1sigma": summary_minus_1sigma,
-            "plus_1sigma": summary_plus_1sigma,
-        }
-    )
-    csv_name = output_dir / f"{planet_name}_{model_name}_bestfit{output_suffix}.csv"
-    bestfit_df.to_csv(csv_name, index=False)
-    print(f"best-fit csv: {csv_name}")
+trace_x = out.whichlink
+trace_samples = out.flatchains
 
-    results_path = output_dir / f"{planet_name}_{model_name}_results{output_suffix}.txt"
-    if use_combined and gr_metrics is None:
-        print(f"warning: {gr_warning}")
-        print(f"results skipped: {results_path}")
+fig1, axes1 = plt.subplots(len(p0), figsize=(10, 1 + 2 * len(p0)), sharex=True)
+for i in range(len(p0)):
+    ax = axes1[i]
+    ax.plot(trace_x, trace_samples[:, i], ".", alpha=0.2, rasterized=True)
+    ax.set_ylabel(labels[i])
+    if all(parinfo[i]["limited"]):
+        ylim_pad = 0.05 * (parinfo[i]["limits"][1] - parinfo[i]["limits"][0])
+        ax.set_ylim(parinfo[i]["limits"][0] - ylim_pad, parinfo[i]["limits"][1] + ylim_pad)
     else:
-        write_results_txt(
-            results_path,
-            planet_name,
-            model_name,
-            summary_labels,
-            summary_samples,
-            out,
-            lc_csvfiles,
-            rv_csvfile,
-            ncores,
-            len(p0),
-            {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
-            gr_metrics=gr_metrics,
-            gr_warning=gr_warning,
-        )
-        print(f"results written: {results_path}")
+        finite_trace = trace_samples[np.isfinite(trace_samples[:, i]), i]
+        if finite_trace.size > 0:
+            trace_min = np.nanmin(finite_trace)
+            trace_max = np.nanmax(finite_trace)
+            trace_span = trace_max - trace_min
+            if trace_span <= 0.0:
+                ylim_pad = max(1e-6, 0.05 * max(1.0, abs(trace_min)))
+            else:
+                ylim_pad = 0.05 * trace_span
+            ax.set_ylim(trace_min - ylim_pad, trace_max + ylim_pad)
+axes1[-1].set_xlabel("Link number")
+fig1_name = output_dir / f"{planet_name}_{model_name}_trace.pdf"
+fig1.savefig(fig1_name)
+plt.close(fig1)
 
-    trace_x = out.whichlink
-    trace_samples = out.flatchains
-    if use_combined:
-        trace_samples = samples_for_outputs
-        trace_x = np.arange(trace_samples.shape[0])
-
-    fig1, axes1 = plt.subplots(len(p0), figsize=(10, 1 + 2 * len(p0)), sharex=True)
-    for i in range(len(p0)):
-        ax = axes1[i]
-        ax.plot(trace_x, trace_samples[:, i], ".", alpha=0.2, rasterized=True)
-        ax.set_ylabel(labels[i])
-        if all(parinfo[i]["limited"]):
-            ylim_pad = 0.05 * (parinfo[i]["limits"][1] - parinfo[i]["limits"][0])
-            ax.set_ylim(parinfo[i]["limits"][0] - ylim_pad, parinfo[i]["limits"][1] + ylim_pad)
-        else:
-            finite_trace = trace_samples[np.isfinite(trace_samples[:, i]), i]
-            if finite_trace.size > 0:
-                trace_min = np.nanmin(finite_trace)
-                trace_max = np.nanmax(finite_trace)
-                trace_span = trace_max - trace_min
-                if trace_span <= 0.0:
-                    ylim_pad = max(1e-6, 0.05 * max(1.0, abs(trace_min)))
-                else:
-                    ylim_pad = 0.05 * trace_span
-                ax.set_ylim(trace_min - ylim_pad, trace_max + ylim_pad)
-    axes1[-1].set_xlabel("Link number")
-    fig1_name = output_dir / f"{planet_name}_{model_name}_trace{output_suffix}.pdf"
-    fig1.savefig(fig1_name)
-    plt.close(fig1)
-
-    plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
-    corner_display_labels = get_plot_display_labels(plot_labels)
-    fig2 = corner.corner(plot_samples, labels=corner_display_labels, label_kwargs={"fontsize": corner_label_fontsize})
-    apply_corner_scalar_formatting(fig2, corner_display_labels, corner_label_fontsize)
-    for ax in fig2.axes:
-        for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
-            if not isinstance(artist, QuadContourSet):
-                artist.set_rasterized(True)
-    fig2_name = output_dir / f"{planet_name}_{model_name}_corner{output_suffix}.pdf"
-    fig2.savefig(fig2_name, bbox_inches='tight', pad_inches=0.3)
-    plt.close(fig2)
+plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
+fig2 = corner.corner(plot_samples, labels=plot_labels)
+for ax in fig2.axes:
+    for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
+        if not isinstance(artist, QuadContourSet):
+            artist.set_rasterized(True)
+fig2_name = output_dir / f"{planet_name}_{model_name}_corner.pdf"
+fig2.savefig(fig2_name, bbox_inches='tight', pad_inches=0.3)
+plt.close(fig2)
 
 
 # %%
@@ -1142,63 +715,31 @@ rv_phase_all = ((rv_time_all - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 rv_phase = rv_phase_all[~omit_rv_mask_all]
 rv_phase_omitted = rv_phase_all[omit_rv_mask_all]
 
-if make_smoothed_rv_plot_from_existing:
-    rv_model_time = np.linspace(np.nanmin(rv_time_all), np.nanmax(rv_time_all), rv_smooth_npts)
-    rv_model_exptime_s = None
-else:
-    rv_model_time = rv_time_all
-    rv_model_exptime_s = rv_exptime_s_all
-rv_model_phase = ((rv_model_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
-
 lc_sort = np.argsort(lc_phase)
-rv_sort = np.argsort(rv_model_phase)
+rv_sort = np.argsort(rv_phase_all)
 
-if make_smoothed_rv_plot_from_existing:
-    lc_median = best_lc
-    lc_p16 = lc_p84 = lc_p025 = lc_p975 = lc_median
-    median_model = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_model_time, None)
-    median_model_at_data = best_rv
-    p16 = p84 = p025 = p975 = median_model
-else:
-    # Posterior bands
-    all_samples = samples_for_outputs
-    nsamples_total = all_samples.shape[0]
-    nsamp = min(1000, nsamples_total)
-    rng = np.random.default_rng(12345)
-    sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
+# Posterior bands
+all_samples = samples_for_outputs
+nsamples_total = all_samples.shape[0]
+nsamp = min(1000, nsamples_total)
+rng = np.random.default_rng(12345)
+sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
 
-    # LC posterior models
-    lc_models = np.zeros((nsamp, len(lc_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            lc_models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
-        lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
+# LC posterior models
+lc_models = np.zeros((nsamp, len(lc_time)))
+for j, idx in enumerate(sel_idx):
+    unpacked = unpack_params(all_samples[idx, :])
+    if unpacked is None:
+        lc_models[j, :] = np.nan
+        continue
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
+    lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
 
-    lc_median = np.nanmedian(lc_models, axis=0)
-    lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
-    lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
-    lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
-    lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
-
-    # RV posterior models
-    models = np.zeros((nsamp, len(rv_model_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
-        models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_model_time, rv_model_exptime_s)
-
-    median_model = np.nanmedian(models, axis=0)
-    p16 = np.nanpercentile(models, 16.0, axis=0)
-    p84 = np.nanpercentile(models, 84.0, axis=0)
-    p025 = np.nanpercentile(models, 2.5, axis=0)
-    p975 = np.nanpercentile(models, 97.5, axis=0)
-    median_model_at_data = median_model
+lc_median = np.nanmedian(lc_models, axis=0)
+lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
+lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
+lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
+lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
 
 lc_residuals = lc_flux - lc_median
 lc_plot_window = 0.05
@@ -1242,6 +783,23 @@ if show_lc_binned_points:
     lc_binned_residual = np.asarray(binned_residual)
     lc_binned_residual_err = np.asarray(binned_residual_err)
 
+# RV posterior models
+ntime = len(rv_time_all)
+models = np.zeros((nsamp, ntime))
+for j, idx in enumerate(sel_idx):
+    unpacked = unpack_params(all_samples[idx, :])
+    if unpacked is None:
+        models[j, :] = np.nan
+        continue
+    t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
+    models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_time_all, rv_exptime_s_all)
+
+median_model = np.nanmedian(models, axis=0)
+p16 = np.nanpercentile(models, 16.0, axis=0)
+p84 = np.nanpercentile(models, 84.0, axis=0)
+p025 = np.nanpercentile(models, 2.5, axis=0)
+p975 = np.nanpercentile(models, 97.5, axis=0)
+
 font_choice = 'serif'    # maybe change to 'Times New Roman?'
 label_fontsize = 14      # axis label fontsize
 tick_fontsize = 12       # tick label fontsize
@@ -1259,7 +817,7 @@ sub_lc = gs[0, 0].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
 ax_lc_top = fig3.add_subplot(sub_lc[0, 0])
 ax_lc_bot = fig3.add_subplot(sub_lc[1, 0], sharex=ax_lc_top)
 
-if show_lc_sigma and not make_smoothed_rv_plot_from_existing:
+if show_lc_sigma:
     ax_lc_top.fill_between(
         lc_phase[lc_sort],
         lc_p025[lc_sort],
@@ -1362,11 +920,10 @@ ax_top = fig3.add_subplot(sub[0, 0])
 ax_bot = fig3.add_subplot(sub[1, 0], sharex=ax_top)
 
 # 2-sigma and 1-sigma bands
-if not make_smoothed_rv_plot_from_existing:
-    ax_top.fill_between(rv_model_phase[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_2sig, linewidth=0.0)
-    ax_top.fill_between(rv_model_phase[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_1sig, linewidth=0.0)
+ax_top.fill_between(rv_phase_all[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
+                    color='red', alpha=band_alpha_2sig, linewidth=0.0)
+ax_top.fill_between(rv_phase_all[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
+                    color='red', alpha=band_alpha_1sig, linewidth=0.0)
 
 # Data and median model
 if rv_phase_omitted.size > 0:
@@ -1391,7 +948,7 @@ ax_top.errorbar(
     zorder=5
 )
 ax_top.plot(
-    rv_model_phase[rv_sort],
+    rv_phase_all[rv_sort],
     median_model[rv_sort] * 1e3,
     '-',
     lw=model_linewidth,
@@ -1404,7 +961,7 @@ ax_top.tick_params(axis='x', labelbottom=False)
 ax_top.legend(prop={'size': legend_fontsize, 'family': font_choice}, loc='best')
 
 # Residuals
-residuals_ms_all = (rv_data_all - median_model_at_data) * 1e3
+residuals_ms_all = (rv_data_all - median_model) * 1e3
 residuals_ms = residuals_ms_all[~omit_rv_mask_all]
 residuals_ms_omitted = residuals_ms_all[omit_rv_mask_all]
 if rv_phase_omitted.size > 0:
@@ -1441,7 +998,6 @@ fig3.text(0.5, 0.5, 'Radial velocity (m/s)', va='center', rotation='vertical',
 
 
 fig3.tight_layout(rect=[0.02, 0.02, 1, 0.98])
-smooth_output_suffix = "_smoothed" if make_smoothed_rv_plot_from_existing else ""
-fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side{output_suffix}{smooth_output_suffix}.pdf"
+fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side.pdf"
 fig3.savefig(fig3_name)
 plt.close(fig3)
