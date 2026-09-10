@@ -47,7 +47,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_stacked_lc_rv_semifinal"
+model_name = "joint_stacked_lc_rv_final"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
