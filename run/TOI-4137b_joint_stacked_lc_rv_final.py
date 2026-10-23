@@ -47,7 +47,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_stacked_lc_rv_final"
+model_name = "joint_stacked_lc_rv_final_grand-pra_circular_with-outlier"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -61,6 +61,8 @@ ecc = 0.0
 omega = -10.0  # deg
 ld_u = [0.1, 0.3]
 ld_model = "quadratic"
+ground_ld_u = [0.251, 0.315]  # Sloan i' initialization from Yee et al. (2022)
+ground_ld_model = "quadratic"
 
 rp_guess = r_2_fixed / r_1_fixed
 a_over_rstar_guess = 1.0 / r_1_fixed
@@ -71,10 +73,11 @@ vsini_guess = 15.0
 lambda_guess = 30.0
 
 fit_b = True
-fit_e = True
+fit_e = False
 fit_K = True
 fit_ld = True
 fit_period = True
+use_yee_eccentricity_prior = False
 
 
 report_K_in_m_per_s = True
@@ -87,6 +90,9 @@ R_SUN_TO_R_EARTH = 109.076
 R_SUN_TO_AU = 0.00465047
 
 corner_label_fontsize = 18
+corner_max_samples = 50000
+corner_plot_datapoints = False
+corner_random_seed = 12345
 show_lc_sigma = True
 show_lc_binned_points = True
 lc_phase_bin_width = 0.0025
@@ -94,10 +100,20 @@ lc_raw_alpha = 0.025
 lc_raw_label = "Phase-Folded Data"
 lc_binned_label = "Average Binned Data"
 lc_model_label = "Median Model"
+lc_cadence_config = {
+    1800: {"sectors": (19, 26), "supersample_factor": 15},
+    600: {"sectors": (52, 53), "supersample_factor": 7},
+    200: {"sectors": (59, 73), "supersample_factor": 3},
+}
+ground_lc_exposure_s = 60.0
+ground_lc_supersample_factor = 5
+lc_oot_half_width_phase = 0.03
+lc_uncertainty_sigma_clip = 5.0
+lc_uncertainty_max_iterations = 5
 rv_oversample_model = True
 # rv_oversample_model = False
 rv_oversample_nsub = 23
-make_smoothed_rv_plot_from_existing = True
+make_smoothed_rv_plot_from_existing = False
 rv_smooth_npts = 1000
 omit_rv_sorted_indices = []  # chronological RV-point indices to omit from the fit
 omitted_rv_alpha = 0.25  # opacity of ommitted RV outliers
@@ -110,22 +126,23 @@ thin_burnin = None
 nlink = 50000
 # nlink = 0  # Remake '_combined' outputs
 nburnin = None  # defaults to total combined nlink/10 if None
-ncores = 12
+ncores = 14
 
 # %%
 # ------------------------------------------------------------
 # Prior/step configuration
 # ------------------------------------------------------------
 auto_K_from_data = False
-K_guess = 0.125
+K_guess = 0.156  # km/s; Yee et al. (2022) value used only to initialize walkers
 K_lims = [0.0, 0.500]
 
-t0_lims = [t0_guess - 0.001, t0_guess + 0.001]
+t0_lims = [2461054.0, 2461055.0]
 period_lims = [period_guess - 0.1, period_guess + 0.1]  # ignored
 rp_lims = [0.0, 1.0]
 a_lims = [2.5, 20.0]  # ignored
 
 ecc_lims = [0.0, 1.0]
+yee_eccentricity_sigma = 0.246  # Yee et al. (2022) 68% upper limit
 sqrt_e_max = np.sqrt(ecc_lims[1])
 sqrt_e_cosw_guess = np.sqrt(ecc) * np.cos(np.deg2rad(omega))
 sqrt_e_sinw_guess = np.sqrt(ecc) * np.sin(np.deg2rad(omega))
@@ -140,10 +157,13 @@ vsini_lims = [max(0.0, vsini_guess - 15.0), vsini_guess + 15.0]
 lambda_lims = [lambda_guess - 210.0, lambda_guess + 180.0]
 inc_lims = [70.0, 90.0]  # ignored
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
+ground_ld_u_lims = [(0.0, 1.0) for _ in ground_ld_u]
+ground_flux_baseline_lims = [0.9, 1.1]
+ground_detrend_coeff_lims = [-0.1, 0.1]
 
-use_rho_star_prior = True
+use_rho_star_prior = False
 rho_star_mu = 0.621
-rho_star_sigma = 0.1
+rho_star_sigma = 0.057  # symmetrized Yee et al. (2022) uncertainty
 rho_star_prior_type = "gaussian"
 if rho_star_prior_type.lower() == "gaussian":
     rho_star_prior = [rho_star_mu, rho_star_sigma]
@@ -162,7 +182,17 @@ param_config = {
     "sqrt_e_sinw": {"guess": sqrt_e_sinw_guess, "wid": 0.05, "prior": sqrt_e_sinw_lims},
     "vsini": {"guess": vsini_guess, "wid": 0.2, "prior": vsini_lims},
     "lambda": {"guess": lambda_guess, "wid": 1.0, "prior": lambda_lims},
-    "K": {"guess": K_guess, "wid": 0.05, "prior": K_lims},
+    "K": {"guess": K_guess, "wid": 0.01, "prior": K_lims},
+    "gamma_rv": {"guess": -41.12, "wid": 0.01, "prior": [-42.12, -40.12]},
+    "rv_slope_mps_day": {"guess": 0.0, "wid": 10.0, "prior": [-1000.0, 1000.0]},
+    "log_rv_jitter_mps": {"guess": np.log(10.0), "wid": 0.1,
+                            "prior": [np.log(0.1), np.log(100.0)]},
+    "ground_flux_baseline": {"guess": 1.0, "wid": 0.001,
+                              "prior": ground_flux_baseline_lims},
+    "ground_airmass_coeff": {"guess": 0.0, "wid": 0.001,
+                              "prior": ground_detrend_coeff_lims},
+    "ground_width_coeff": {"guess": 0.0, "wid": 0.001,
+                            "prior": ground_detrend_coeff_lims},
 }
 
 corner_label_map = {
@@ -174,10 +204,19 @@ corner_label_map = {
     "inc_deg": r"$i$ ($^\circ$)",
     "sqrt_e_cosw": r"$\sqrt{e}\cos\omega_\star$",
     "sqrt_e_sinw": r"$\sqrt{e}\sin\omega_\star$",
+    "eccentricity": r"$e$",
+    "omega_deg": r"$\omega_\star$ ($^\circ$)",
     "vsini": r"$v \sin i_\star$ (km s$^{-1}$)",
     "lambda": r"$\lambda$ ($^\circ$)",
     "K": r"$K$ (km s$^{-1}$)",
     "K_m_s": r"$K$ (m s$^{-1}$)",
+    "gamma_rv": r"$\gamma$ (km s$^{-1}$)",
+    "rv_slope_mps_day": r"$\dot{\gamma}$ (m s$^{-1}$ d$^{-1}$)",
+    "log_rv_jitter_mps": r"$\ln\sigma_{\rm RV}$",
+    "rv_jitter_mps": r"$\sigma_{\rm RV}$ (m s$^{-1}$)",
+    "ground_flux_baseline": r"$F_{0,i'}$",
+    "ground_airmass_coeff": r"$C_{\rm air,i'}$",
+    "ground_width_coeff": r"$C_{\rm width,i'}$",
     "ld_u1": r"$u_1$",
     "ld_u2": r"$u_2$",
     "rho_star_g_cm3": r"$\rho_\star$ (g cm$^{-3}$)",
@@ -188,6 +227,11 @@ corner_label_map = {
 
 for i, u in enumerate(ld_u):
     param_config[f"ld_u{i+1}"] = {"guess": u, "wid": 0.05, "prior": list(ld_u_lims[i])}
+
+for i, u in enumerate(ground_ld_u):
+    name = f"ground_ld_u{i+1}"
+    param_config[name] = {"guess": u, "wid": 0.05, "prior": list(ground_ld_u_lims[i])}
+    corner_label_map[name] = rf"$u_{{{i+1},i'}}$"
 
 
 def build_param_setup():
@@ -204,8 +248,11 @@ def build_param_setup():
     names += ["vsini", "lambda"]
     if fit_K:
         names.append("K")
+    names += ["gamma_rv", "rv_slope_mps_day", "log_rv_jitter_mps"]
     if fit_ld:
         names += [f"ld_u{i+1}" for i in range(len(ld_u))]
+    names += [f"ground_ld_u{i+1}" for i in range(len(ground_ld_u))]
+    names += ["ground_flux_baseline", "ground_airmass_coeff", "ground_width_coeff"]
 
     p0 = [param_config[n]["guess"] for n in names]
     wid = [param_config[n]["wid"] for n in names]
@@ -270,6 +317,7 @@ lc_csvfiles = [
 #     run_dir / "data" / planet_name / "TOI-4137b_tess_lightcurve.csv",
 # ]
 rv_csvfile = run_dir / "data" / planet_name / "2026Jan14_TIC417646390.csv"
+ground_lc_csvfile = run_dir / "data" / planet_name / "table4.csv"
 output_dir = run_dir / "edmcmc_output" / planet_name
 output_dir.mkdir(parents=True, exist_ok=True)
 chains_file = output_dir / f"{planet_name}_{model_name}_chains.npz"
@@ -278,6 +326,7 @@ full_chains_file = output_dir / f"{planet_name}_{model_name}_chains_full.npz"
 print(f"run_dir: {run_dir}")
 print(f"lc_csvfiles: {lc_csvfiles}")
 print(f"rv_csvfile: {rv_csvfile}")
+print(f"ground_lc_csvfile: {ground_lc_csvfile}")
 print(f"output_dir: {output_dir}")
 
 
@@ -286,9 +335,35 @@ print(f"output_dir: {output_dir}")
 # Load light-curve data (stacked)
 # ------------------------------------------------------------
 required_cols = ("time", "flux", "flux_err")
-all_time = []
-all_flux = []
-all_flux_err = []
+
+
+def sigma_clipped_std(values, sigma_clip=5.0, max_iterations=5):
+    values = np.asarray(values, dtype=float)
+    keep = np.isfinite(values)
+    for _ in range(max_iterations):
+        clipped = values[keep]
+        if clipped.size < 2:
+            return np.nan
+        center = np.nanmedian(clipped)
+        scatter = np.nanstd(clipped, ddof=1)
+        if not np.isfinite(scatter) or scatter <= 0.0:
+            return np.nan
+        new_keep = np.isfinite(values) & (np.abs(values - center) <= sigma_clip * scatter)
+        if np.array_equal(new_keep, keep):
+            break
+        keep = new_keep
+    return np.nanstd(values[keep], ddof=1)
+
+
+def cadence_settings_for_sector(sector):
+    for exposure_s, config in lc_cadence_config.items():
+        if sector in config["sectors"]:
+            return exposure_s, config["supersample_factor"]
+    raise ValueError(f"No cadence/supersampling configuration exists for TESS sector {sector}.")
+
+
+lc_datasets = []
+lc_sector_uncertainty = {}
 
 for csvfile in lc_csvfiles:
     df = pd.read_csv(csvfile)
@@ -302,19 +377,78 @@ for csvfile in lc_csvfiles:
 
     time = df.loc[mask, "time"].to_numpy(dtype=float)  # BJD - 2457000
     flux_raw = df.loc[mask, "flux"].to_numpy(dtype=float)
-    flux_err_raw = df.loc[mask, "flux_err"].to_numpy(dtype=float)
-
     flux_med = np.nanmedian(flux_raw)
     flux = flux_raw / flux_med
-    flux_err = flux_err_raw / flux_med
+    sector = int(csvfile.stem.rsplit("-s", 1)[1])
+    exposure_s, supersample_factor = cadence_settings_for_sector(sector)
 
-    all_time.append(time)
-    all_flux.append(flux)
-    all_flux_err.append(flux_err)
+    phase = ((time - (t0_bjd_fixed - 2457000.0)) / period_fixed + 0.5) % 1.0 - 0.5
+    oot_flux = flux[np.abs(phase) > lc_oot_half_width_phase]
+    empirical_sigma = sigma_clipped_std(
+        oot_flux,
+        sigma_clip=lc_uncertainty_sigma_clip,
+        max_iterations=lc_uncertainty_max_iterations,
+    )
+    if not np.isfinite(empirical_sigma) or empirical_sigma <= 0.0:
+        raise ValueError(f"Could not estimate a finite out-of-transit uncertainty for {csvfile}.")
 
-lc_time = np.concatenate(all_time)
-lc_flux = np.concatenate(all_flux)
-lc_flux_err = np.concatenate(all_flux_err)
+    flux_err = np.full_like(flux, empirical_sigma)
+    lc_sector_uncertainty[sector] = empirical_sigma
+    lc_datasets.append(
+        {
+            "sector": sector,
+            "exposure_s": exposure_s,
+            "supersample_factor": supersample_factor,
+            "time": time,
+            "flux": flux,
+            "flux_err": flux_err,
+        }
+    )
+
+lc_groups = []
+for exposure_s, config in lc_cadence_config.items():
+    datasets = [dataset for dataset in lc_datasets if dataset["exposure_s"] == exposure_s]
+    if not datasets:
+        continue
+    lc_groups.append(
+        {
+            "exposure_s": exposure_s,
+            "supersample_factor": config["supersample_factor"],
+            "time": np.concatenate([dataset["time"] for dataset in datasets]),
+            "flux": np.concatenate([dataset["flux"] for dataset in datasets]),
+            "flux_err": np.concatenate([dataset["flux_err"] for dataset in datasets]),
+        }
+    )
+
+lc_time = np.concatenate([group["time"] for group in lc_groups])
+lc_flux = np.concatenate([group["flux"] for group in lc_groups])
+lc_flux_err = np.concatenate([group["flux_err"] for group in lc_groups])
+
+for sector, uncertainty in sorted(lc_sector_uncertainty.items()):
+    print(f"TESS sector {sector}: empirical out-of-transit uncertainty = {uncertainty * 1e6:.1f} ppm")
+
+
+# %%
+# ------------------------------------------------------------
+# Load Grand-Pra Sloan i' light curve (BJD - 2457000)
+# ------------------------------------------------------------
+ground_required_cols = ("time", "flux", "flux_err", "detrend_airmass", "detrend_width")
+ground_df = pd.read_csv(ground_lc_csvfile)
+for col in ground_required_cols:
+    if col not in ground_df.columns:
+        raise ValueError(f"Ground-based LC CSV missing required column: {col}")
+
+ground_mask = np.ones(len(ground_df), dtype=bool)
+for col in ground_required_cols:
+    ground_mask &= np.isfinite(ground_df[col].to_numpy(dtype=float))
+
+ground_time = ground_df.loc[ground_mask, "time"].to_numpy(dtype=float)
+if np.nanmedian(ground_time) > 2_000_000.0:
+    ground_time = ground_time - 2457000.0
+ground_flux = ground_df.loc[ground_mask, "flux"].to_numpy(dtype=float)
+ground_flux_err = ground_df.loc[ground_mask, "flux_err"].to_numpy(dtype=float)
+ground_detrend_airmass = ground_df.loc[ground_mask, "detrend_airmass"].to_numpy(dtype=float)
+ground_detrend_width = ground_df.loc[ground_mask, "detrend_width"].to_numpy(dtype=float)
 
 
 # %%
@@ -348,6 +482,11 @@ rv_time_omitted = rv_time_all[omit_rv_mask_all]
 rv_data_omitted = rv_data_all[omit_rv_mask_all]
 rv_err_omitted = rv_err_all[omit_rv_mask_all]
 rv_exptime_s_omitted = rv_exptime_s_all[omit_rv_mask_all]
+rv_reference_time = float(np.nanmedian(rv_time))
+
+gamma_guess = float(np.nanmedian(rv_data))
+param_config["gamma_rv"]["guess"] = gamma_guess
+param_config["gamma_rv"]["prior"] = [gamma_guess - 1.0, gamma_guess + 1.0]
 
 # Derived guesses/limits
 if auto_K_from_data and fit_K:
@@ -360,34 +499,13 @@ if auto_K_from_data and fit_K:
     elif k_prior_type == "uniform":
         param_config["K"]["prior"] = K_lims
 
-# Precompute weighted systemic offset using initial guess
-i_rad = np.radians(incl_fixed)
-rsum = (r_1_fixed + r_2_fixed)
-val = rsum / max(1e-12, np.sin(i_rad))
-if val >= 1.0:
-    transit_duration_days = 0.2
-else:
-    transit_duration_days = period_fixed / np.pi * val
-
-transit_half_phase = (transit_duration_days / 2.0) / period_fixed
-phases_for_mask = ((rv_time - t0_bjd_fixed) / period_fixed + 0.5) % 1.0 - 0.5
-in_transit_mask = np.abs(phases_for_mask) < transit_half_phase
-out_of_transit_mask = ~in_transit_mask
-
-if out_of_transit_mask.sum() < 3:
-    out_of_transit_mask = np.ones_like(out_of_transit_mask, dtype=bool)
-weights = 1.0 / (rv_err**2)
-gamma_weighted = np.sum(weights[out_of_transit_mask] * rv_data[out_of_transit_mask]) / np.sum(weights[out_of_transit_mask])
-rv_data = rv_data - gamma_weighted
-rv_data_all = rv_data_all - gamma_weighted
-rv_data_omitted = rv_data_omitted - gamma_weighted
-
-
 # %%
 # ------------------------------------------------------------
 # Models
 # ------------------------------------------------------------
-def batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, ld_coeffs, time_axis):
+def batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val,
+                ld_coeffs, time_axis, exposure_s, supersample_factor,
+                limb_darkening_model=None):
     t0_lc = t0_bjd - 2457000.0
 
     bat_params = batman.TransitParams()
@@ -399,20 +517,91 @@ def batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omeg
     bat_params.ecc = ecc_val
     bat_params.w = omega_val
     bat_params.u = ld_coeffs
-    bat_params.limb_dark = ld_model
+    bat_params.limb_dark = ld_model if limb_darkening_model is None else limb_darkening_model
 
     try:
-        model = batman.TransitModel(bat_params, time_axis)
+        model = batman.TransitModel(
+            bat_params,
+            time_axis,
+            supersample_factor=int(supersample_factor),
+            exp_time=float(exposure_s) / 86400.0,
+        )
         return model.light_curve(bat_params)
     except Exception:
         return np.full_like(time_axis, np.nan)
+
+
+def batman_flux_stacked(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val,
+                        omega_val, ld_coeffs):
+    models = []
+    for group in lc_groups:
+        models.append(
+            batman_flux(
+                t0_bjd,
+                per,
+                rp_over_rstar,
+                a_over_rstar,
+                inc_deg,
+                ecc_val,
+                omega_val,
+                ld_coeffs,
+                group["time"],
+                group["exposure_s"],
+                group["supersample_factor"],
+            )
+        )
+    return np.concatenate(models)
+
+
+def ground_lc_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val,
+                    omega_val, ground_ld_coeffs, flux_baseline, airmass_coeff,
+                    width_coeff, time_axis=None, detrend_airmass=None,
+                    detrend_width=None):
+    if time_axis is None:
+        time_axis = ground_time
+    if detrend_airmass is None:
+        detrend_airmass = ground_detrend_airmass
+    if detrend_width is None:
+        detrend_width = ground_detrend_width
+
+    transit = batman_flux(
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        ground_ld_coeffs,
+        time_axis,
+        ground_lc_exposure_s,
+        ground_lc_supersample_factor,
+        ground_ld_model,
+    )
+    return flux_baseline * transit + airmass_coeff * detrend_airmass + width_coeff * detrend_width
 
 
 def semi_major_axis_from_a_over_rstar(a_over_rstar):
     return a_over_rstar * stellar_radius_fixed
 
 
-def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K, time_axis, exptime_axis_s=None):
+def primary_orbital_semiamplitude(a_orbit_rsun, q, per_days, ecc_val, inc_deg):
+    r_sun_km = 695700.0
+    a_primary_km = a_orbit_rsun * r_sun_km * q / (1.0 + q)
+    per_seconds = per_days * 86400.0
+    return (2.0 * np.pi * a_primary_km * np.sin(np.deg2rad(inc_deg)) /
+            (per_seconds * np.sqrt(1.0 - ecc_val**2)))
+
+
+def _primary_rv(rv_call):
+    if isinstance(rv_call, (tuple, list)):
+        return np.asarray(rv_call[0])
+    return np.asarray(rv_call)
+
+
+def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val,
+             vsini, lambda_deg, K, gamma_rv, rv_slope_mps_day, time_axis,
+             exptime_axis_s=None):
     r_1 = 1.0 / a_over_rstar
     r_2 = rp_over_rstar * r_1
     a_orbit = semi_major_axis_from_a_over_rstar(a_over_rstar)
@@ -426,11 +615,9 @@ def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_v
         reshape_shape = eval_time_axis.shape
         eval_time_axis = eval_time_axis.reshape(-1)
 
-    rv_call = ellc.rv(
-        eval_time_axis,
+    rv_kwargs = dict(
         t_zero=t0_bjd,
         period=per,
-        lambda_1=lambda_deg,
         radius_1=r_1,
         radius_2=r_2,
         incl=inc_deg,
@@ -440,25 +627,36 @@ def rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_v
         q=q_fixed,
         shape_1="sphere",
         shape_2="sphere",
-        vsini_1=vsini,
-        flux_weighted=True,
         sbratio=0.0,
         verbose=0,
     )
-    if isinstance(rv_call, (tuple, list)):
-        base = np.asarray(rv_call[0])
-    else:
-        base = np.asarray(rv_call)
+    flux_weighted_rv = _primary_rv(ellc.rv(
+        eval_time_axis,
+        lambda_1=lambda_deg,
+        vsini_1=vsini,
+        flux_weighted=True,
+        **rv_kwargs,
+    ))
+    center_of_mass_rv = _primary_rv(ellc.rv(
+        eval_time_axis,
+        flux_weighted=False,
+        **rv_kwargs,
+    ))
+
+    # K scales the orbital reflex velocity; it must not rescale the RM anomaly.
+    rm_anomaly = flux_weighted_rv - center_of_mass_rv
+    physical_K = primary_orbital_semiamplitude(a_orbit, q_fixed, per, ecc_val, inc_deg)
+    if not np.isfinite(physical_K) or physical_K <= 0.0:
+        return np.full_like(np.asarray(time_axis, dtype=float), np.nan)
+    orbital_rv = center_of_mass_rv if K is None else center_of_mass_rv * (K / physical_K)
+    base = orbital_rv + rm_anomaly
+
     if reshape_shape is not None:
         base = np.nanmean(base.reshape(reshape_shape), axis=1)
 
-    if K is None:
-        return base
-
-    K0 = 0.5 * (np.nanmax(base) - np.nanmin(base))
-    if K0 <= 0.0:
-        return np.full_like(base, np.nan)
-    return base * (K / K0)
+    time_axis = np.asarray(time_axis, dtype=float)
+    trend = gamma_rv + (rv_slope_mps_day / 1000.0) * (time_axis - rv_reference_time)
+    return base + trend
 
 
 def rho_star_from_a_over_rstar(per_days, a_over_rstar):
@@ -469,6 +667,8 @@ def rho_star_from_a_over_rstar(per_days, a_over_rstar):
 
 def build_derived_posterior_samples(base_samples, include_constant=False):
     derived_labels = []
+    if fit_e:
+        derived_labels += ["eccentricity", "omega_deg"]
     if include_derived_rho_star:
         derived_labels.append("rho_star_g_cm3")
     if include_derived_inclination:
@@ -487,8 +687,17 @@ def build_derived_posterior_samples(base_samples, include_constant=False):
         unpacked = unpack_params(base_samples[i, :])
         if unpacked is None:
             continue
-        _, per, rp_over_rstar, a_over_rstar, inc_deg, _, _, _, _, _, _ = unpacked
+        per = unpacked[1]
+        rp_over_rstar = unpacked[2]
+        a_over_rstar = unpacked[3]
+        inc_deg = unpacked[4]
+        ecc_val = unpacked[5]
+        omega_val = unpacked[6]
         col = 0
+        if fit_e:
+            derived_samples[i, col] = ecc_val
+            derived_samples[i, col + 1] = omega_val
+            col += 2
         if include_derived_rho_star:
             derived_samples[i, col] = rho_star_from_a_over_rstar(per, a_over_rstar)
             col += 1
@@ -519,6 +728,9 @@ def transform_output_samples(samples, labels):
         if name == "K" and report_K_in_m_per_s:
             transformed_samples[:, i] = transformed_samples[:, i] * 1e3
             transformed_labels[i] = "K_m_s"
+        elif name == "log_rv_jitter_mps":
+            transformed_samples[:, i] = np.exp(transformed_samples[:, i])
+            transformed_labels[i] = "rv_jitter_mps"
     return transformed_samples, transformed_labels
 
 
@@ -650,11 +862,24 @@ def unpack_params(p):
     else:
         K_val = None
 
+    gamma_rv = p[idx]
+    rv_slope_mps_day = p[idx + 1]
+    log_rv_jitter_mps = p[idx + 2]
+    rv_jitter_mps = np.exp(log_rv_jitter_mps)
+    idx += 3
+
     if fit_ld:
         ld_coeffs = list(p[idx:idx + len(ld_u)])
         idx += len(ld_u)
     else:
         ld_coeffs = ld_u
+
+    ground_ld_coeffs = list(p[idx:idx + len(ground_ld_u)])
+    idx += len(ground_ld_u)
+    ground_flux_baseline = p[idx]
+    ground_airmass_coeff = p[idx + 1]
+    ground_width_coeff = p[idx + 2]
+    idx += 3
 
     if fit_b:
         fac = (1.0 - ecc_val**2) / (1.0 + ecc_val * np.sin(np.deg2rad(omega_val)))
@@ -668,7 +893,105 @@ def unpack_params(p):
         if not (0.0 < inc_deg <= 90.0):
             return None
 
-    return t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, ld_coeffs
+    return (
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        vsini,
+        lambda_deg,
+        K_val,
+        gamma_rv,
+        rv_slope_mps_day,
+        rv_jitter_mps,
+        ld_coeffs,
+        ground_ld_coeffs,
+        ground_flux_baseline,
+        ground_airmass_coeff,
+        ground_width_coeff,
+    )
+
+
+def gaussian_log_likelihood(data, model, uncertainty):
+    variance = np.asarray(uncertainty, dtype=float) ** 2
+    residual = np.asarray(data, dtype=float) - np.asarray(model, dtype=float)
+    if np.any(~np.isfinite(variance)) or np.any(variance <= 0.0):
+        return -np.inf
+    return -0.5 * np.sum(residual**2 / variance + np.log(2.0 * np.pi * variance))
+
+
+def log_likelihood_lc(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg,
+                      ecc_val, omega_val, ld_coeffs):
+    log_likelihood = 0.0
+    for group in lc_groups:
+        model = batman_flux(
+            t0_bjd,
+            per,
+            rp_over_rstar,
+            a_over_rstar,
+            inc_deg,
+            ecc_val,
+            omega_val,
+            ld_coeffs,
+            group["time"],
+            group["exposure_s"],
+            group["supersample_factor"],
+        )
+        if not np.all(np.isfinite(model)):
+            return -np.inf
+        log_likelihood += gaussian_log_likelihood(group["flux"], model, group["flux_err"])
+    return log_likelihood
+
+
+def log_likelihood_ground_lc(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg,
+                             ecc_val, omega_val, ground_ld_coeffs,
+                             ground_flux_baseline, ground_airmass_coeff,
+                             ground_width_coeff):
+    model = ground_lc_model(
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        ground_ld_coeffs,
+        ground_flux_baseline,
+        ground_airmass_coeff,
+        ground_width_coeff,
+    )
+    if not np.all(np.isfinite(model)):
+        return -np.inf
+    return gaussian_log_likelihood(ground_flux, model, ground_flux_err)
+
+
+def log_likelihood_rv(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg,
+                      ecc_val, omega_val, vsini, lambda_deg, K_val, gamma_rv,
+                      rv_slope_mps_day, rv_jitter_mps):
+    model = rv_model(
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        vsini,
+        lambda_deg,
+        K_val,
+        gamma_rv,
+        rv_slope_mps_day,
+        rv_time,
+        rv_exptime_s,
+    )
+    if not np.all(np.isfinite(model)):
+        return -np.inf
+    effective_uncertainty = np.sqrt(rv_err**2 + (rv_jitter_mps / 1000.0) ** 2)
+    return gaussian_log_likelihood(rv_data, model, effective_uncertainty)
+
 
 def loglikelihood_joint(p):
     sampled_logp = evaluate_sampled_log_prior(p, labels)
@@ -679,7 +1002,26 @@ def loglikelihood_joint(p):
     if unpacked is None:
         return -np.inf
 
-    t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, ld_coeffs = unpacked
+    (
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        vsini,
+        lambda_deg,
+        K_val,
+        gamma_rv,
+        rv_slope_mps_day,
+        rv_jitter_mps,
+        ld_coeffs,
+        ground_ld_coeffs,
+        ground_flux_baseline,
+        ground_airmass_coeff,
+        ground_width_coeff,
+    ) = unpacked
 
     if per <= 0.0:
         return -np.inf
@@ -688,16 +1030,52 @@ def loglikelihood_joint(p):
     if a_over_rstar <= 0.0:
         return -np.inf
 
-    lc_model = batman_flux(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, ld_coeffs, lc_time)
-    if not np.all(np.isfinite(lc_model)):
+    lc_log_likelihood = log_likelihood_lc(
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        ld_coeffs,
+    )
+    ground_lc_log_likelihood = log_likelihood_ground_lc(
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        ground_ld_coeffs,
+        ground_flux_baseline,
+        ground_airmass_coeff,
+        ground_width_coeff,
+    )
+    rv_log_likelihood = log_likelihood_rv(
+        t0_bjd,
+        per,
+        rp_over_rstar,
+        a_over_rstar,
+        inc_deg,
+        ecc_val,
+        omega_val,
+        vsini,
+        lambda_deg,
+        K_val,
+        gamma_rv,
+        rv_slope_mps_day,
+        rv_jitter_mps,
+    )
+    if (not np.isfinite(lc_log_likelihood)
+            or not np.isfinite(ground_lc_log_likelihood)
+            or not np.isfinite(rv_log_likelihood)):
         return -np.inf
-    rv_model_vals = rv_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val, omega_val, vsini, lambda_deg, K_val, rv_time, rv_exptime_s)
-    if not np.all(np.isfinite(rv_model_vals)):
-        return -np.inf
+    logp = sampled_logp + lc_log_likelihood + ground_lc_log_likelihood + rv_log_likelihood
 
-    chi2_lc = np.sum((lc_flux - lc_model) ** 2 / lc_flux_err**2)
-    chi2_rv = np.sum((rv_data - rv_model_vals) ** 2 / rv_err**2)
-    logp = sampled_logp - 0.5 * (chi2_lc + chi2_rv)
+    if fit_e and use_yee_eccentricity_prior:
+        logp += -0.5 * (ecc_val / yee_eccentricity_sigma) ** 2
 
     if use_rho_star_prior:
         rho_star = rho_star_from_a_over_rstar(per, a_over_rstar)
@@ -961,7 +1339,9 @@ output_suffix = "_combined" if use_combined else ""
 # ------------------------------------------------------------
 # Results.txt Function
 # ------------------------------------------------------------
-def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files, rv_file, ncores, n_fit_params, fit_flags, gr_metrics=None, gr_warning=None):
+def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_files,
+                      ground_lc_file, rv_file, ncores, n_fit_params, fit_flags,
+                      gr_metrics=None, gr_warning=None):
     header = [
         "***************************************",
         "#######################################",
@@ -980,6 +1360,7 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
     ]
 
     header += [f"-> LC: {Path(f).name}" for f in lc_files]
+    header += [f"-> Ground LC (Grand-Pra Sloan i'): {Path(ground_lc_file).name}"]
     header += [f"-> RV: {Path(rv_file).name}"]
 
     header += [
@@ -998,6 +1379,23 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
         f"-> fit_e = {fit_flags['fit_e']}",
         f"-> fit_K = {fit_flags['fit_K']}",
         f"-> fit_ld = {fit_flags['fit_ld']}",
+        f"-> fit_period = {fit_flags['fit_period']}",
+        f"-> Yee eccentricity prior = {fit_flags['use_yee_eccentricity_prior']}",
+        f"-> stellar-density prior = {fit_flags['use_rho_star_prior']}",
+        f"-> omitted chronological RV indices = {fit_flags['omit_rv_sorted_indices']}",
+        "",
+        "Noise and exposure model:",
+        "-> TESS uncertainties = sector-specific sigma-clipped out-of-transit scatter",
+        "-> Grand-Pra uncertainties = supplied table4.csv uncertainties",
+        "-> Grand-Pra baseline = additive airmass and width detrending",
+        (f"-> Grand-Pra integration = {ground_lc_exposure_s:g}s/"
+         f"{ground_lc_supersample_factor} samples"),
+        "-> RV uncertainties = pipeline uncertainty plus fitted jitter in quadrature",
+        "-> RV offset and nightly linear slope are fitted",
+        "-> TESS supersampling = " + ", ".join(
+            f"{exposure_s}s/{config['supersample_factor']} samples"
+            for exposure_s, config in lc_cadence_config.items()
+        ),
         "",
         "#################################",
         "Gelman-Rubin statistics:",
@@ -1072,10 +1470,20 @@ if not make_smoothed_rv_plot_from_existing:
             summary_samples,
             out,
             lc_csvfiles,
+            ground_lc_csvfile,
             rv_csvfile,
             ncores,
             len(p0),
-            {"fit_b": fit_b, "fit_e": fit_e, "fit_K": fit_K, "fit_ld": fit_ld},
+            {
+                "fit_b": fit_b,
+                "fit_e": fit_e,
+                "fit_K": fit_K,
+                "fit_ld": fit_ld,
+                "fit_period": fit_period,
+                "use_yee_eccentricity_prior": use_yee_eccentricity_prior,
+                "use_rho_star_prior": use_rho_star_prior,
+                "omit_rv_sorted_indices": omit_rv_sorted_indices,
+            },
             gr_metrics=gr_metrics,
             gr_warning=gr_warning,
         )
@@ -1112,8 +1520,20 @@ if not make_smoothed_rv_plot_from_existing:
     plt.close(fig1)
 
     plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
+    corner_samples = plot_samples
+    if corner_samples.shape[0] > corner_max_samples:
+        corner_rng = np.random.default_rng(corner_random_seed)
+        corner_idx = corner_rng.choice(corner_samples.shape[0], size=corner_max_samples, replace=False)
+        corner_samples = corner_samples[corner_idx, :]
+        print(f"corner plot: using {corner_max_samples} of {plot_samples.shape[0]} posterior samples")
     corner_display_labels = get_plot_display_labels(plot_labels)
-    fig2 = corner.corner(plot_samples, labels=corner_display_labels, label_kwargs={"fontsize": corner_label_fontsize})
+    fig2 = corner.corner(
+        corner_samples,
+        labels=corner_display_labels,
+        label_kwargs={"fontsize": corner_label_fontsize},
+        plot_datapoints=corner_plot_datapoints,
+        pcolor_kwargs={"rasterized": True},
+    )
     apply_corner_scalar_formatting(fig2, corner_display_labels, corner_label_fontsize)
     for ax in fig2.axes:
         for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
@@ -1132,12 +1552,55 @@ med_unpacked = unpack_params(sampled_med)
 if med_unpacked is None:
     raise ValueError("Median parameters are invalid; cannot build plots.")
 
-t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, ld_med = med_unpacked
+(
+    t0_bjd_med,
+    per_med,
+    rp_med,
+    a_over_med,
+    inc_med,
+    ecc_med,
+    omega_med,
+    vsini_med,
+    lambda_med,
+    K_med,
+    gamma_rv_med,
+    rv_slope_med,
+    rv_jitter_med,
+    ld_med,
+    ground_ld_med,
+    ground_flux_baseline_med,
+    ground_airmass_coeff_med,
+    ground_width_coeff_med,
+) = med_unpacked
 
-best_lc = batman_flux(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, ld_med, lc_time)
-best_rv = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_time_all, rv_exptime_s_all)
-
+best_lc = batman_flux_stacked(
+    t0_bjd_med,
+    per_med,
+    rp_med,
+    a_over_med,
+    inc_med,
+    ecc_med,
+    omega_med,
+    ld_med,
+)
+best_rv = rv_model(
+    t0_bjd_med,
+    per_med,
+    rp_med,
+    a_over_med,
+    inc_med,
+    ecc_med,
+    omega_med,
+    vsini_med,
+    lambda_med,
+    K_med,
+    gamma_rv_med,
+    rv_slope_med,
+    rv_time_all,
+    rv_exptime_s_all,
+)
 lc_phase = ((lc_time - (t0_bjd_med - 2457000.0)) / per_med + 0.5) % 1.0 - 0.5
+ground_phase = ((ground_time - (t0_bjd_med - 2457000.0)) / per_med + 0.5) % 1.0 - 0.5
 rv_phase_all = ((rv_time_all - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 rv_phase = rv_phase_all[~omit_rv_mask_all]
 rv_phase_omitted = rv_phase_all[omit_rv_mask_all]
@@ -1151,56 +1614,140 @@ else:
 rv_model_phase = ((rv_model_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 
 lc_sort = np.argsort(lc_phase)
+ground_sort = np.argsort(ground_phase)
 rv_sort = np.argsort(rv_model_phase)
 
-if make_smoothed_rv_plot_from_existing:
-    lc_median = best_lc
-    lc_p16 = lc_p84 = lc_p025 = lc_p975 = lc_median
-    median_model = rv_model(t0_bjd_med, per_med, rp_med, a_over_med, inc_med, ecc_med, omega_med, vsini_med, lambda_med, K_med, rv_model_time, None)
-    median_model_at_data = best_rv
-    p16 = p84 = p025 = p975 = median_model
-else:
-    # Posterior bands
-    all_samples = samples_for_outputs
-    nsamples_total = all_samples.shape[0]
-    nsamp = min(1000, nsamples_total)
-    rng = np.random.default_rng(12345)
-    sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
+# Posterior bands use the same posterior samples for the regular and smoothed plots.
+all_samples = samples_for_outputs
+nsamples_total = all_samples.shape[0]
+nsamp = min(1000, nsamples_total)
+rng = np.random.default_rng(12345)
+sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
 
-    # LC posterior models
-    lc_models = np.zeros((nsamp, len(lc_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            lc_models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, _, _, _, ld_s = unpacked
-        lc_models[j, :] = batman_flux(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, ld_s, lc_time)
+lc_models = np.zeros((nsamp, len(lc_time)))
+ground_transit_models = np.zeros((nsamp, len(ground_time)))
+rv_models = np.zeros((nsamp, len(rv_model_time)))
+rv_models_at_data = np.zeros((nsamp, len(rv_time_all))) if make_smoothed_rv_plot_from_existing else None
+for j, idx in enumerate(sel_idx):
+    unpacked = unpack_params(all_samples[idx, :])
+    if unpacked is None:
+        lc_models[j, :] = np.nan
+        ground_transit_models[j, :] = np.nan
+        rv_models[j, :] = np.nan
+        if rv_models_at_data is not None:
+            rv_models_at_data[j, :] = np.nan
+        continue
+    (
+        t0_bjd_s,
+        per_s,
+        rp_s,
+        a_over_s,
+        inc_s,
+        ecc_s,
+        omega_s,
+        vsini_s,
+        lambda_s,
+        K_s,
+        gamma_rv_s,
+        rv_slope_s,
+        _,
+        ld_s,
+        ground_ld_s,
+        ground_flux_baseline_s,
+        ground_airmass_coeff_s,
+        ground_width_coeff_s,
+    ) = unpacked
+    lc_models[j, :] = batman_flux_stacked(
+        t0_bjd_s,
+        per_s,
+        rp_s,
+        a_over_s,
+        inc_s,
+        ecc_s,
+        omega_s,
+        ld_s,
+    )
+    ground_transit_models[j, :] = batman_flux(
+        t0_bjd_s,
+        per_s,
+        rp_s,
+        a_over_s,
+        inc_s,
+        ecc_s,
+        omega_s,
+        ground_ld_s,
+        ground_time,
+        ground_lc_exposure_s,
+        ground_lc_supersample_factor,
+        ground_ld_model,
+    )
+    rv_models[j, :] = rv_model(
+        t0_bjd_s,
+        per_s,
+        rp_s,
+        a_over_s,
+        inc_s,
+        ecc_s,
+        omega_s,
+        vsini_s,
+        lambda_s,
+        K_s,
+        gamma_rv_s,
+        rv_slope_s,
+        rv_model_time,
+        rv_model_exptime_s,
+    )
+    if rv_models_at_data is not None:
+        rv_models_at_data[j, :] = rv_model(
+            t0_bjd_s,
+            per_s,
+            rp_s,
+            a_over_s,
+            inc_s,
+            ecc_s,
+            omega_s,
+            vsini_s,
+            lambda_s,
+            K_s,
+            gamma_rv_s,
+            rv_slope_s,
+            rv_time_all,
+            rv_exptime_s_all,
+        )
 
-    lc_median = np.nanmedian(lc_models, axis=0)
-    lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
-    lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
-    lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
-    lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
+lc_median = np.nanmedian(lc_models, axis=0)
+lc_p16 = np.nanpercentile(lc_models, 16.0, axis=0)
+lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
+lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
+lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
 
-    # RV posterior models
-    models = np.zeros((nsamp, len(rv_model_time)))
-    for j, idx in enumerate(sel_idx):
-        unpacked = unpack_params(all_samples[idx, :])
-        if unpacked is None:
-            models[j, :] = np.nan
-            continue
-        t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, _ = unpacked
-        models[j, :] = rv_model(t0_bjd_s, per_s, rp_s, a_over_s, inc_s, ecc_s, omega_s, vsini_s, lambda_s, K_s, rv_model_time, rv_model_exptime_s)
-
-    median_model = np.nanmedian(models, axis=0)
-    p16 = np.nanpercentile(models, 16.0, axis=0)
-    p84 = np.nanpercentile(models, 84.0, axis=0)
-    p025 = np.nanpercentile(models, 2.5, axis=0)
-    p975 = np.nanpercentile(models, 97.5, axis=0)
-    median_model_at_data = median_model
+ground_lc_median = np.nanmedian(ground_transit_models, axis=0)
+ground_lc_p16 = np.nanpercentile(ground_transit_models, 16.0, axis=0)
+ground_lc_p84 = np.nanpercentile(ground_transit_models, 84.0, axis=0)
+ground_lc_p025 = np.nanpercentile(ground_transit_models, 2.5, axis=0)
+ground_lc_p975 = np.nanpercentile(ground_transit_models, 97.5, axis=0)
+median_model = np.nanmedian(rv_models, axis=0)
+p16 = np.nanpercentile(rv_models, 16.0, axis=0)
+p84 = np.nanpercentile(rv_models, 84.0, axis=0)
+p025 = np.nanpercentile(rv_models, 2.5, axis=0)
+p975 = np.nanpercentile(rv_models, 97.5, axis=0)
+median_model_at_data = (
+    np.nanmedian(rv_models_at_data, axis=0)
+    if rv_models_at_data is not None
+    else median_model
+)
 
 lc_residuals = lc_flux - lc_median
+ground_detrended_flux = (
+    ground_flux
+    - ground_airmass_coeff_med * ground_detrend_airmass
+    - ground_width_coeff_med * ground_detrend_width
+) / ground_flux_baseline_med
+ground_detrended_flux_err = ground_flux_err / abs(ground_flux_baseline_med)
+ground_lc_residuals = ground_detrended_flux - ground_lc_median
+rv_err_effective_all = np.sqrt(rv_err_all**2 + (rv_jitter_med / 1000.0) ** 2)
+rv_err_effective = rv_err_effective_all[~omit_rv_mask_all]
+rv_err_effective_omitted = rv_err_effective_all[omit_rv_mask_all]
 lc_plot_window = 0.05
 
 lc_binned_phase = np.array([])
@@ -1259,7 +1806,7 @@ sub_lc = gs[0, 0].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
 ax_lc_top = fig3.add_subplot(sub_lc[0, 0])
 ax_lc_bot = fig3.add_subplot(sub_lc[1, 0], sharex=ax_lc_top)
 
-if show_lc_sigma and not make_smoothed_rv_plot_from_existing:
+if show_lc_sigma:
     ax_lc_top.fill_between(
         lc_phase[lc_sort],
         lc_p025[lc_sort],
@@ -1361,19 +1908,30 @@ sub = gs[0, 1].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
 ax_top = fig3.add_subplot(sub[0, 0])
 ax_bot = fig3.add_subplot(sub[1, 0], sharex=ax_top)
 
-# 2-sigma and 1-sigma bands
-if not make_smoothed_rv_plot_from_existing:
-    ax_top.fill_between(rv_model_phase[rv_sort], p025[rv_sort] * 1e3, p975[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_2sig, linewidth=0.0)
-    ax_top.fill_between(rv_model_phase[rv_sort], p16[rv_sort] * 1e3, p84[rv_sort] * 1e3,
-                        color='red', alpha=band_alpha_1sig, linewidth=0.0)
+# Plot relative RVs while retaining the fitted absolute offset in the likelihood.
+ax_top.fill_between(
+    rv_model_phase[rv_sort],
+    (p025[rv_sort] - gamma_rv_med) * 1e3,
+    (p975[rv_sort] - gamma_rv_med) * 1e3,
+    color='red',
+    alpha=band_alpha_2sig,
+    linewidth=0.0,
+)
+ax_top.fill_between(
+    rv_model_phase[rv_sort],
+    (p16[rv_sort] - gamma_rv_med) * 1e3,
+    (p84[rv_sort] - gamma_rv_med) * 1e3,
+    color='red',
+    alpha=band_alpha_1sig,
+    linewidth=0.0,
+)
 
 # Data and median model
 if rv_phase_omitted.size > 0:
     ax_top.errorbar(
         rv_phase_omitted,
-        rv_data_omitted * 1e3,
-        yerr=rv_err_omitted * 1e3,
+        (rv_data_omitted - gamma_rv_med) * 1e3,
+        yerr=rv_err_effective_omitted * 1e3,
         fmt='o',
         ms=marker_size,
         c='k',
@@ -1382,8 +1940,8 @@ if rv_phase_omitted.size > 0:
     )
 ax_top.errorbar(
     rv_phase,
-    rv_data * 1e3,
-    yerr=rv_err * 1e3,
+    (rv_data - gamma_rv_med) * 1e3,
+    yerr=rv_err_effective * 1e3,
     fmt='o',
     ms=marker_size,
     c='k',
@@ -1392,7 +1950,7 @@ ax_top.errorbar(
 )
 ax_top.plot(
     rv_model_phase[rv_sort],
-    median_model[rv_sort] * 1e3,
+    (median_model[rv_sort] - gamma_rv_med) * 1e3,
     '-',
     lw=model_linewidth,
     alpha=1.0,
@@ -1411,7 +1969,7 @@ if rv_phase_omitted.size > 0:
     ax_bot.errorbar(
         rv_phase_omitted,
         residuals_ms_omitted,
-        yerr=rv_err_omitted * 1e3,
+        yerr=rv_err_effective_omitted * 1e3,
         fmt='o',
         ms=marker_size,
         c='k',
@@ -1420,7 +1978,7 @@ if rv_phase_omitted.size > 0:
 ax_bot.errorbar(
     rv_phase,
     residuals_ms,
-    yerr=rv_err * 1e3,
+    yerr=rv_err_effective * 1e3,
     fmt='o',
     ms=marker_size,
     c='k',
@@ -1436,7 +1994,7 @@ for ax in (ax_top, ax_bot):
 
 fig3.text(0.05, 0.5, 'Normalized Flux', va='center', rotation='vertical',
           fontsize=label_fontsize, fontname=font_choice)
-fig3.text(0.5, 0.5, 'Radial velocity (m/s)', va='center', rotation='vertical',
+fig3.text(0.5, 0.5, 'Relative radial velocity (m/s)', va='center', rotation='vertical',
           fontsize=label_fontsize, fontname=font_choice)
 
 
@@ -1445,3 +2003,79 @@ smooth_output_suffix = "_smoothed" if make_smoothed_rv_plot_from_existing else "
 fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side{output_suffix}{smooth_output_suffix}.pdf"
 fig3.savefig(fig3_name)
 plt.close(fig3)
+
+
+# %%
+# ------------------------------------------------------------
+# Grand-Pra Sloan i' Fit Plot
+# ------------------------------------------------------------
+fig4, (ax_ground_top, ax_ground_bot) = plt.subplots(
+    2,
+    1,
+    figsize=(7, 6),
+    sharex=True,
+    gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
+)
+
+if show_lc_sigma:
+    ax_ground_top.fill_between(
+        ground_phase[ground_sort],
+        ground_lc_p025[ground_sort],
+        ground_lc_p975[ground_sort],
+        color="red",
+        alpha=band_alpha_2sig,
+        linewidth=0.0,
+    )
+    ax_ground_top.fill_between(
+        ground_phase[ground_sort],
+        ground_lc_p16[ground_sort],
+        ground_lc_p84[ground_sort],
+        color="red",
+        alpha=band_alpha_1sig,
+        linewidth=0.0,
+    )
+
+ax_ground_top.errorbar(
+    ground_phase,
+    ground_detrended_flux,
+    yerr=ground_detrended_flux_err,
+    fmt="o",
+    ms=marker_size,
+    color="k",
+    label="Grand-Pra Sloan $i'$ Data",
+    zorder=3,
+)
+ax_ground_top.plot(
+    ground_phase[ground_sort],
+    ground_lc_median[ground_sort],
+    color="red",
+    lw=model_linewidth,
+    label="Median Model",
+    zorder=4,
+)
+ax_ground_top.set_ylabel("Normalized Flux", fontsize=label_fontsize, fontname=font_choice)
+ax_ground_top.set_xlim(-0.05, 0.05)
+ax_ground_top.tick_params(axis="x", labelbottom=False)
+ax_ground_top.legend(prop={"size": legend_fontsize, "family": font_choice}, loc="best")
+
+ax_ground_bot.errorbar(
+    ground_phase,
+    ground_lc_residuals,
+    yerr=ground_detrended_flux_err,
+    fmt="o",
+    ms=marker_size,
+    color="k",
+)
+ax_ground_bot.axhline(0.0, color="red", linestyle="-", alpha=0.7)
+ax_ground_bot.set_xlabel("Phase", fontsize=label_fontsize, fontname=font_choice)
+ax_ground_bot.set_ylabel("Residuals", fontsize=label_fontsize, fontname=font_choice)
+
+for ax in (ax_ground_top, ax_ground_bot):
+    ax.tick_params(axis="both", labelsize=tick_fontsize)
+    for lbl in ax.get_xticklabels() + ax.get_yticklabels():
+        lbl.set_fontname(font_choice)
+
+fig4.tight_layout()
+fig4_name = output_dir / f"{planet_name}_{model_name}_grand_pra_sloan_i_model{output_suffix}.pdf"
+fig4.savefig(fig4_name)
+plt.close(fig4)
