@@ -47,7 +47,7 @@ import ellc
 # TOI-4137b system parameters
 # ------------------------------------------------------------
 planet_name = "TOI-4137b"
-model_name = "joint_stacked_lc_rv_final_grand-pra_eccentric-yee_no-outlier"
+model_name = "joint_stacked_lc_rv_final_grand-pra-shared_eccentric-yee_no-outlier"
 
 r_1_fixed = 0.1280615074825186  # R_star / a (initial)
 r_2_fixed = 0.01107927677378  # R_planet / a (initial)
@@ -61,8 +61,6 @@ ecc = 0.0
 omega = -10.0  # deg
 ld_u = [0.1, 0.3]
 ld_model = "quadratic"
-ground_ld_u = [0.251, 0.315]  # Sloan i' initialization from Yee et al. (2022)
-ground_ld_model = "quadratic"
 
 rp_guess = r_2_fixed / r_1_fixed
 a_over_rstar_guess = 1.0 / r_1_fixed
@@ -105,8 +103,12 @@ lc_cadence_config = {
     600: {"sectors": (52, 53), "supersample_factor": 7},
     200: {"sectors": (59, 73), "supersample_factor": 3},
 }
-ground_lc_exposure_s = 60.0
-ground_lc_supersample_factor = 5
+# table4.csv has a median 72.576-s cadence but does not record exposure duration.
+# Integrating over one cadence is a conservative approximation; three samples are
+# sufficient at this cadence relative to the transit ingress/egress timescale.
+ground_lc_exposure_s = 72.576
+ground_lc_supersample_factor = 3
+ground_oot_half_width_phase = 0.022
 lc_oot_half_width_phase = 0.03
 lc_uncertainty_sigma_clip = 5.0
 lc_uncertainty_max_iterations = 5
@@ -123,7 +125,7 @@ save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 50000
+nlink = 100000
 # nlink = 0  # Remake '_combined' outputs
 nburnin = None  # defaults to total combined nlink/10 if None
 ncores = 14
@@ -157,9 +159,6 @@ vsini_lims = [max(0.0, vsini_guess - 15.0), vsini_guess + 15.0]
 lambda_lims = [lambda_guess - 210.0, lambda_guess + 180.0]
 inc_lims = [70.0, 90.0]  # ignored
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
-ground_ld_u_lims = [(0.0, 1.0) for _ in ground_ld_u]
-ground_flux_baseline_lims = [0.9, 1.1]
-ground_detrend_coeff_lims = [-0.1, 0.1]
 
 use_rho_star_prior = False
 rho_star_mu = 0.621
@@ -187,12 +186,6 @@ param_config = {
     "rv_slope_mps_day": {"guess": 0.0, "wid": 10.0, "prior": [-1000.0, 1000.0]},
     "log_rv_jitter_mps": {"guess": np.log(10.0), "wid": 0.1,
                             "prior": [np.log(0.1), np.log(100.0)]},
-    "ground_flux_baseline": {"guess": 1.0, "wid": 0.001,
-                              "prior": ground_flux_baseline_lims},
-    "ground_airmass_coeff": {"guess": 0.0, "wid": 0.001,
-                              "prior": ground_detrend_coeff_lims},
-    "ground_width_coeff": {"guess": 0.0, "wid": 0.001,
-                            "prior": ground_detrend_coeff_lims},
 }
 
 corner_label_map = {
@@ -214,9 +207,6 @@ corner_label_map = {
     "rv_slope_mps_day": r"$\dot{\gamma}$ (m s$^{-1}$ d$^{-1}$)",
     "log_rv_jitter_mps": r"$\ln\sigma_{\rm RV}$",
     "rv_jitter_mps": r"$\sigma_{\rm RV}$ (m s$^{-1}$)",
-    "ground_flux_baseline": r"$F_{0,i'}$",
-    "ground_airmass_coeff": r"$C_{\rm air,i'}$",
-    "ground_width_coeff": r"$C_{\rm width,i'}$",
     "ld_u1": r"$u_1$",
     "ld_u2": r"$u_2$",
     "rho_star_g_cm3": r"$\rho_\star$ (g cm$^{-3}$)",
@@ -227,12 +217,6 @@ corner_label_map = {
 
 for i, u in enumerate(ld_u):
     param_config[f"ld_u{i+1}"] = {"guess": u, "wid": 0.05, "prior": list(ld_u_lims[i])}
-
-for i, u in enumerate(ground_ld_u):
-    name = f"ground_ld_u{i+1}"
-    param_config[name] = {"guess": u, "wid": 0.05, "prior": list(ground_ld_u_lims[i])}
-    corner_label_map[name] = rf"$u_{{{i+1},i'}}$"
-
 
 def build_param_setup():
     names = ["t0_bjd"]
@@ -251,8 +235,6 @@ def build_param_setup():
     names += ["gamma_rv", "rv_slope_mps_day", "log_rv_jitter_mps"]
     if fit_ld:
         names += [f"ld_u{i+1}" for i in range(len(ld_u))]
-    names += [f"ground_ld_u{i+1}" for i in range(len(ground_ld_u))]
-    names += ["ground_flux_baseline", "ground_airmass_coeff", "ground_width_coeff"]
 
     p0 = [param_config[n]["guess"] for n in names]
     wid = [param_config[n]["wid"] for n in names]
@@ -420,19 +402,15 @@ for exposure_s, config in lc_cadence_config.items():
         }
     )
 
-lc_time = np.concatenate([group["time"] for group in lc_groups])
-lc_flux = np.concatenate([group["flux"] for group in lc_groups])
-lc_flux_err = np.concatenate([group["flux_err"] for group in lc_groups])
-
 for sector, uncertainty in sorted(lc_sector_uncertainty.items()):
     print(f"TESS sector {sector}: empirical out-of-transit uncertainty = {uncertainty * 1e6:.1f} ppm")
 
 
 # %%
 # ------------------------------------------------------------
-# Load Grand-Pra Sloan i' light curve (BJD - 2457000)
+# Add Grand-Pra light curve to the shared light-curve groups (BJD - 2457000)
 # ------------------------------------------------------------
-ground_required_cols = ("time", "flux", "flux_err", "detrend_airmass", "detrend_width")
+ground_required_cols = ("time", "flux", "flux_err")
 ground_df = pd.read_csv(ground_lc_csvfile)
 for col in ground_required_cols:
     if col not in ground_df.columns:
@@ -445,10 +423,33 @@ for col in ground_required_cols:
 ground_time = ground_df.loc[ground_mask, "time"].to_numpy(dtype=float)
 if np.nanmedian(ground_time) > 2_000_000.0:
     ground_time = ground_time - 2457000.0
-ground_flux = ground_df.loc[ground_mask, "flux"].to_numpy(dtype=float)
-ground_flux_err = ground_df.loc[ground_mask, "flux_err"].to_numpy(dtype=float)
-ground_detrend_airmass = ground_df.loc[ground_mask, "detrend_airmass"].to_numpy(dtype=float)
-ground_detrend_width = ground_df.loc[ground_mask, "detrend_width"].to_numpy(dtype=float)
+ground_flux_raw = ground_df.loc[ground_mask, "flux"].to_numpy(dtype=float)
+ground_flux_err_raw = ground_df.loc[ground_mask, "flux_err"].to_numpy(dtype=float)
+ground_phase_initial = ((ground_time - (t0_bjd_fixed - 2457000.0)) / period_fixed + 0.5) % 1.0 - 0.5
+ground_oot_mask = np.abs(ground_phase_initial) > ground_oot_half_width_phase
+if np.count_nonzero(ground_oot_mask) < 3:
+    raise ValueError("Too few out-of-transit Grand-Pra points to normalize the light curve.")
+ground_flux_median = np.nanmedian(ground_flux_raw[ground_oot_mask])
+ground_flux = ground_flux_raw / ground_flux_median
+ground_flux_err = ground_flux_err_raw / ground_flux_median
+
+lc_groups.append(
+    {
+        "exposure_s": ground_lc_exposure_s,
+        "supersample_factor": ground_lc_supersample_factor,
+        "time": ground_time,
+        "flux": ground_flux,
+        "flux_err": ground_flux_err,
+    }
+)
+
+lc_time = np.concatenate([group["time"] for group in lc_groups])
+lc_flux = np.concatenate([group["flux"] for group in lc_groups])
+lc_flux_err = np.concatenate([group["flux_err"] for group in lc_groups])
+print(
+    f"Grand-Pra: normalized using {np.count_nonzero(ground_oot_mask)} out-of-transit points; "
+    f"{ground_lc_exposure_s:g}-s integration/{ground_lc_supersample_factor} samples"
+)
 
 
 # %%
@@ -551,34 +552,6 @@ def batman_flux_stacked(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_v
             )
         )
     return np.concatenate(models)
-
-
-def ground_lc_model(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg, ecc_val,
-                    omega_val, ground_ld_coeffs, flux_baseline, airmass_coeff,
-                    width_coeff, time_axis=None, detrend_airmass=None,
-                    detrend_width=None):
-    if time_axis is None:
-        time_axis = ground_time
-    if detrend_airmass is None:
-        detrend_airmass = ground_detrend_airmass
-    if detrend_width is None:
-        detrend_width = ground_detrend_width
-
-    transit = batman_flux(
-        t0_bjd,
-        per,
-        rp_over_rstar,
-        a_over_rstar,
-        inc_deg,
-        ecc_val,
-        omega_val,
-        ground_ld_coeffs,
-        time_axis,
-        ground_lc_exposure_s,
-        ground_lc_supersample_factor,
-        ground_ld_model,
-    )
-    return flux_baseline * transit + airmass_coeff * detrend_airmass + width_coeff * detrend_width
 
 
 def semi_major_axis_from_a_over_rstar(a_over_rstar):
@@ -874,13 +847,6 @@ def unpack_params(p):
     else:
         ld_coeffs = ld_u
 
-    ground_ld_coeffs = list(p[idx:idx + len(ground_ld_u)])
-    idx += len(ground_ld_u)
-    ground_flux_baseline = p[idx]
-    ground_airmass_coeff = p[idx + 1]
-    ground_width_coeff = p[idx + 2]
-    idx += 3
-
     if fit_b:
         fac = (1.0 - ecc_val**2) / (1.0 + ecc_val * np.sin(np.deg2rad(omega_val)))
         if fac <= 0.0:
@@ -908,10 +874,6 @@ def unpack_params(p):
         rv_slope_mps_day,
         rv_jitter_mps,
         ld_coeffs,
-        ground_ld_coeffs,
-        ground_flux_baseline,
-        ground_airmass_coeff,
-        ground_width_coeff,
     )
 
 
@@ -944,28 +906,6 @@ def log_likelihood_lc(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg,
             return -np.inf
         log_likelihood += gaussian_log_likelihood(group["flux"], model, group["flux_err"])
     return log_likelihood
-
-
-def log_likelihood_ground_lc(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg,
-                             ecc_val, omega_val, ground_ld_coeffs,
-                             ground_flux_baseline, ground_airmass_coeff,
-                             ground_width_coeff):
-    model = ground_lc_model(
-        t0_bjd,
-        per,
-        rp_over_rstar,
-        a_over_rstar,
-        inc_deg,
-        ecc_val,
-        omega_val,
-        ground_ld_coeffs,
-        ground_flux_baseline,
-        ground_airmass_coeff,
-        ground_width_coeff,
-    )
-    if not np.all(np.isfinite(model)):
-        return -np.inf
-    return gaussian_log_likelihood(ground_flux, model, ground_flux_err)
 
 
 def log_likelihood_rv(t0_bjd, per, rp_over_rstar, a_over_rstar, inc_deg,
@@ -1017,10 +957,6 @@ def loglikelihood_joint(p):
         rv_slope_mps_day,
         rv_jitter_mps,
         ld_coeffs,
-        ground_ld_coeffs,
-        ground_flux_baseline,
-        ground_airmass_coeff,
-        ground_width_coeff,
     ) = unpacked
 
     if per <= 0.0:
@@ -1040,19 +976,6 @@ def loglikelihood_joint(p):
         omega_val,
         ld_coeffs,
     )
-    ground_lc_log_likelihood = log_likelihood_ground_lc(
-        t0_bjd,
-        per,
-        rp_over_rstar,
-        a_over_rstar,
-        inc_deg,
-        ecc_val,
-        omega_val,
-        ground_ld_coeffs,
-        ground_flux_baseline,
-        ground_airmass_coeff,
-        ground_width_coeff,
-    )
     rv_log_likelihood = log_likelihood_rv(
         t0_bjd,
         per,
@@ -1068,11 +991,9 @@ def loglikelihood_joint(p):
         rv_slope_mps_day,
         rv_jitter_mps,
     )
-    if (not np.isfinite(lc_log_likelihood)
-            or not np.isfinite(ground_lc_log_likelihood)
-            or not np.isfinite(rv_log_likelihood)):
+    if not np.isfinite(lc_log_likelihood) or not np.isfinite(rv_log_likelihood):
         return -np.inf
-    logp = sampled_logp + lc_log_likelihood + ground_lc_log_likelihood + rv_log_likelihood
+    logp = sampled_logp + lc_log_likelihood + rv_log_likelihood
 
     if fit_e and use_yee_eccentricity_prior:
         logp += -0.5 * (ecc_val / yee_eccentricity_sigma) ** 2
@@ -1360,7 +1281,7 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
     ]
 
     header += [f"-> LC: {Path(f).name}" for f in lc_files]
-    header += [f"-> Ground LC (Grand-Pra Sloan i'): {Path(ground_lc_file).name}"]
+    header += [f"-> Ground LC (Grand-Pra; shared transit/LD model): {Path(ground_lc_file).name}"]
     header += [f"-> RV: {Path(rv_file).name}"]
 
     header += [
@@ -1386,8 +1307,8 @@ def write_results_txt(path, planet_name, model_name, labels, samples, out, lc_fi
         "",
         "Noise and exposure model:",
         "-> TESS uncertainties = sector-specific sigma-clipped out-of-transit scatter",
-        "-> Grand-Pra uncertainties = supplied table4.csv uncertainties",
-        "-> Grand-Pra baseline = additive airmass and width detrending",
+        "-> Grand-Pra uncertainties = supplied table4.csv uncertainties after out-of-transit normalization",
+        "-> Grand-Pra model = shared TESS transit geometry and limb darkening; no separate nuisance parameters",
         (f"-> Grand-Pra integration = {ground_lc_exposure_s:g}s/"
          f"{ground_lc_supersample_factor} samples"),
         "-> RV uncertainties = pipeline uncertainty plus fitted jitter in quadrature",
@@ -1567,10 +1488,6 @@ if med_unpacked is None:
     rv_slope_med,
     rv_jitter_med,
     ld_med,
-    ground_ld_med,
-    ground_flux_baseline_med,
-    ground_airmass_coeff_med,
-    ground_width_coeff_med,
 ) = med_unpacked
 
 best_lc = batman_flux_stacked(
@@ -1600,7 +1517,6 @@ best_rv = rv_model(
     rv_exptime_s_all,
 )
 lc_phase = ((lc_time - (t0_bjd_med - 2457000.0)) / per_med + 0.5) % 1.0 - 0.5
-ground_phase = ((ground_time - (t0_bjd_med - 2457000.0)) / per_med + 0.5) % 1.0 - 0.5
 rv_phase_all = ((rv_time_all - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 rv_phase = rv_phase_all[~omit_rv_mask_all]
 rv_phase_omitted = rv_phase_all[omit_rv_mask_all]
@@ -1614,7 +1530,6 @@ else:
 rv_model_phase = ((rv_model_time - t0_bjd_med) / per_med + 0.5) % 1.0 - 0.5
 
 lc_sort = np.argsort(lc_phase)
-ground_sort = np.argsort(ground_phase)
 rv_sort = np.argsort(rv_model_phase)
 
 # Posterior bands use the same posterior samples for the regular and smoothed plots.
@@ -1625,14 +1540,12 @@ rng = np.random.default_rng(12345)
 sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
 
 lc_models = np.zeros((nsamp, len(lc_time)))
-ground_transit_models = np.zeros((nsamp, len(ground_time)))
 rv_models = np.zeros((nsamp, len(rv_model_time)))
 rv_models_at_data = np.zeros((nsamp, len(rv_time_all))) if make_smoothed_rv_plot_from_existing else None
 for j, idx in enumerate(sel_idx):
     unpacked = unpack_params(all_samples[idx, :])
     if unpacked is None:
         lc_models[j, :] = np.nan
-        ground_transit_models[j, :] = np.nan
         rv_models[j, :] = np.nan
         if rv_models_at_data is not None:
             rv_models_at_data[j, :] = np.nan
@@ -1652,10 +1565,6 @@ for j, idx in enumerate(sel_idx):
         rv_slope_s,
         _,
         ld_s,
-        ground_ld_s,
-        ground_flux_baseline_s,
-        ground_airmass_coeff_s,
-        ground_width_coeff_s,
     ) = unpacked
     lc_models[j, :] = batman_flux_stacked(
         t0_bjd_s,
@@ -1666,20 +1575,6 @@ for j, idx in enumerate(sel_idx):
         ecc_s,
         omega_s,
         ld_s,
-    )
-    ground_transit_models[j, :] = batman_flux(
-        t0_bjd_s,
-        per_s,
-        rp_s,
-        a_over_s,
-        inc_s,
-        ecc_s,
-        omega_s,
-        ground_ld_s,
-        ground_time,
-        ground_lc_exposure_s,
-        ground_lc_supersample_factor,
-        ground_ld_model,
     )
     rv_models[j, :] = rv_model(
         t0_bjd_s,
@@ -1721,11 +1616,6 @@ lc_p84 = np.nanpercentile(lc_models, 84.0, axis=0)
 lc_p025 = np.nanpercentile(lc_models, 2.5, axis=0)
 lc_p975 = np.nanpercentile(lc_models, 97.5, axis=0)
 
-ground_lc_median = np.nanmedian(ground_transit_models, axis=0)
-ground_lc_p16 = np.nanpercentile(ground_transit_models, 16.0, axis=0)
-ground_lc_p84 = np.nanpercentile(ground_transit_models, 84.0, axis=0)
-ground_lc_p025 = np.nanpercentile(ground_transit_models, 2.5, axis=0)
-ground_lc_p975 = np.nanpercentile(ground_transit_models, 97.5, axis=0)
 median_model = np.nanmedian(rv_models, axis=0)
 p16 = np.nanpercentile(rv_models, 16.0, axis=0)
 p84 = np.nanpercentile(rv_models, 84.0, axis=0)
@@ -1738,13 +1628,6 @@ median_model_at_data = (
 )
 
 lc_residuals = lc_flux - lc_median
-ground_detrended_flux = (
-    ground_flux
-    - ground_airmass_coeff_med * ground_detrend_airmass
-    - ground_width_coeff_med * ground_detrend_width
-) / ground_flux_baseline_med
-ground_detrended_flux_err = ground_flux_err / abs(ground_flux_baseline_med)
-ground_lc_residuals = ground_detrended_flux - ground_lc_median
 rv_err_effective_all = np.sqrt(rv_err_all**2 + (rv_jitter_med / 1000.0) ** 2)
 rv_err_effective = rv_err_effective_all[~omit_rv_mask_all]
 rv_err_effective_omitted = rv_err_effective_all[omit_rv_mask_all]
@@ -2003,79 +1886,3 @@ smooth_output_suffix = "_smoothed" if make_smoothed_rv_plot_from_existing else "
 fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side{output_suffix}{smooth_output_suffix}.pdf"
 fig3.savefig(fig3_name)
 plt.close(fig3)
-
-
-# %%
-# ------------------------------------------------------------
-# Grand-Pra Sloan i' Fit Plot
-# ------------------------------------------------------------
-fig4, (ax_ground_top, ax_ground_bot) = plt.subplots(
-    2,
-    1,
-    figsize=(7, 6),
-    sharex=True,
-    gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
-)
-
-if show_lc_sigma:
-    ax_ground_top.fill_between(
-        ground_phase[ground_sort],
-        ground_lc_p025[ground_sort],
-        ground_lc_p975[ground_sort],
-        color="red",
-        alpha=band_alpha_2sig,
-        linewidth=0.0,
-    )
-    ax_ground_top.fill_between(
-        ground_phase[ground_sort],
-        ground_lc_p16[ground_sort],
-        ground_lc_p84[ground_sort],
-        color="red",
-        alpha=band_alpha_1sig,
-        linewidth=0.0,
-    )
-
-ax_ground_top.errorbar(
-    ground_phase,
-    ground_detrended_flux,
-    yerr=ground_detrended_flux_err,
-    fmt="o",
-    ms=marker_size,
-    color="k",
-    label="Grand-Pra Sloan $i'$ Data",
-    zorder=3,
-)
-ax_ground_top.plot(
-    ground_phase[ground_sort],
-    ground_lc_median[ground_sort],
-    color="red",
-    lw=model_linewidth,
-    label="Median Model",
-    zorder=4,
-)
-ax_ground_top.set_ylabel("Normalized Flux", fontsize=label_fontsize, fontname=font_choice)
-ax_ground_top.set_xlim(-0.05, 0.05)
-ax_ground_top.tick_params(axis="x", labelbottom=False)
-ax_ground_top.legend(prop={"size": legend_fontsize, "family": font_choice}, loc="best")
-
-ax_ground_bot.errorbar(
-    ground_phase,
-    ground_lc_residuals,
-    yerr=ground_detrended_flux_err,
-    fmt="o",
-    ms=marker_size,
-    color="k",
-)
-ax_ground_bot.axhline(0.0, color="red", linestyle="-", alpha=0.7)
-ax_ground_bot.set_xlabel("Phase", fontsize=label_fontsize, fontname=font_choice)
-ax_ground_bot.set_ylabel("Residuals", fontsize=label_fontsize, fontname=font_choice)
-
-for ax in (ax_ground_top, ax_ground_bot):
-    ax.tick_params(axis="both", labelsize=tick_fontsize)
-    for lbl in ax.get_xticklabels() + ax.get_yticklabels():
-        lbl.set_fontname(font_choice)
-
-fig4.tight_layout()
-fig4_name = output_dir / f"{planet_name}_{model_name}_grand_pra_sloan_i_model{output_suffix}.pdf"
-fig4.savefig(fig4_name)
-plt.close(fig4)
