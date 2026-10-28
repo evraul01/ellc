@@ -156,7 +156,7 @@ b_guess = (a_over_rstar_guess * np.cos(np.deg2rad(inc_guess)) *
 b_lims = [0.0, 1.0]
 
 vsini_lims = [max(0.0, vsini_guess - 15.0), vsini_guess + 15.0]
-lambda_lims = [lambda_guess - 210.0, lambda_guess + 180.0]
+lambda_lims = [lambda_guess - 180.0, lambda_guess + 180.0]
 inc_lims = [70.0, 90.0]  # ignored
 ld_u_lims = [(0.0, 1.0) for _ in ld_u]
 
