@@ -1453,8 +1453,10 @@ double precision function eanom(m, e)
 !  Calculate the eccentric anomaly of a Keplerian orbit with
 ! eccentricity e, from the mean anomaly, m.
 !
-!  Solves Kepler''s equation using Newton-Raphson iteration using formula for
-! initial estimate from Heintz DW, 'Double stars' (Reidel, 1978).
+!  Solves Kepler''s equation using safeguarded Newton-Raphson iteration.
+! The bracket guarantees convergence for all elliptical orbits, including
+! eccentricities very close to one where an unconstrained Newton step can
+! diverge.
 ! 
 !  Input:
 !   m - Mean anomaly in radians.
@@ -1466,11 +1468,11 @@ double precision function eanom(m, e)
 !
 implicit none
 double precision,intent(in) :: m, e
-integer, parameter  :: itmax = 9999
-double precision, parameter :: etol=1.0d-9
+integer, parameter  :: itmax = 100
+double precision, parameter :: etol=1.0d-12
 
 ! Local variables
-double precision :: e0, e1, test
+double precision :: e0, e1, f, flo, fhi, m0, test
 integer  :: it
 
 if ( (e < 0.0d0).or.(e >= 1.0d0)) then
@@ -1480,24 +1482,41 @@ if ( (e < 0.0d0).or.(e >= 1.0d0)) then
  return
 endif
 
-it = 0
-e1 = mod(m,twopi) + e*sin(m) + e*e*sin(2.0d0*m)/2.0d0
-test = 1.0d0
-do while (test > etol)
- it = it + 1
- if (it .gt. itmax) then
-  print *,'function eanom failed to converge'
-  print *,m,e,e0,e1,test
-  stop
+m0 = modulo(m,twopi)
+if (m0 == 0.0d0) then
+ eanom = 0.0d0
+ return
+endif
+
+flo = 0.0d0
+fhi = twopi
+if (e < 0.8d0) then
+ e1 = m0
+else
+ e1 = pi
+endif
+
+do it = 1,itmax
+ f = e1 - e*sin(e1) - m0
+ if (abs(f) <= etol) exit
+
+ if (f > 0.0d0) then
+  fhi = e1
+ else
+  flo = e1
  endif
- e0 = e1
- e1 = e0 + (m-(e0 - e*sin(e0)))/(1.0d0 - e*cos(e0))
- test = abs(e1 - e0)
+
+ e0 = e1 - f/(1.0d0 - e*cos(e1))
+ if ((e0 <= flo).or.(e0 >= fhi)) e0 = 0.5d0*(flo+fhi)
+ test = abs(e0-e1)
+ e1 = e0
+ if (test <= etol) exit
 end do
-e1 = mod(e1, twopi)
-if (e1 < 0.0d0) then
- e1 = e1 + twopi
-endif 
+
+if (it > itmax) then
+ eanom = bad_dble
+ return
+endif
 eanom = e1
 return
 end function eanom

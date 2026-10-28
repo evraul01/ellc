@@ -859,6 +859,10 @@ def unpack_params(p):
         if not (0.0 < inc_deg <= 90.0):
             return None
 
+    # Reject orbits whose periastron separation is inside the two bodies.
+    if a_over_rstar * (1.0 - ecc_val) <= 1.0 + rp_over_rstar:
+        return None
+
     return (
         t0_bjd,
         per,
