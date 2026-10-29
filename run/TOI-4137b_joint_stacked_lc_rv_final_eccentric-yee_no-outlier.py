@@ -2,6 +2,8 @@
 # ------------------------------------------------------------
 # Imports
 # ------------------------------------------------------------
+import gc
+import os
 import sys
 from pathlib import Path
 
@@ -10,9 +12,9 @@ import corner
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.contour import QuadContourSet
 from matplotlib.lines import Line2D
 from matplotlib.ticker import ScalarFormatter
+from PIL import Image
 
 
 def _bootstrap_paths(start_path: Path) -> None:
@@ -35,6 +37,37 @@ def _find_run_dir(start_path: Path) -> Path:
         if (run_candidate / "data").is_dir() and (run_candidate / "edmcmc.py").exists():
             return run_candidate
     raise FileNotFoundError("Could not find the run/ directory containing data/ and edmcmc.py")
+
+
+def savefig_atomic(fig, path, **kwargs):
+    path = Path(path)
+    temporary_path = path.with_name(f".{path.stem}.tmp{path.suffix}")
+    try:
+        fig.savefig(temporary_path, **kwargs)
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def savefig_single_raster_pdf_atomic(fig, path, dpi=150):
+    """Render once to a bitmap, then embed that bitmap in an atomic PDF."""
+    path = Path(path)
+    temporary_pdf = path.with_name(f".{path.stem}.tmp{path.suffix}")
+    temporary_png = path.with_name(f".{path.stem}.tmp.png")
+    try:
+        fig.savefig(temporary_png, format="png", dpi=dpi, facecolor="white")
+        with Image.open(temporary_png) as image:
+            image.convert("RGB").save(
+                temporary_pdf,
+                format="PDF",
+                resolution=dpi,
+                quality=95,
+                subsampling=0,
+            )
+        temporary_pdf.replace(path)
+    finally:
+        temporary_pdf.unlink(missing_ok=True)
+        temporary_png.unlink(missing_ok=True)
 
 
 _bootstrap_paths(Path(__file__).resolve().parent)
@@ -88,9 +121,11 @@ R_SUN_TO_R_EARTH = 109.076
 R_SUN_TO_AU = 0.00465047
 
 corner_label_fontsize = 18
-corner_max_samples = 50000
+corner_bins = 40
+corner_smooth = 1.0
+corner_raster_dpi = 150
 corner_plot_datapoints = False
-corner_random_seed = 12345
+posterior_predictive_max_samples = 300
 show_lc_sigma = True
 show_lc_binned_points = True
 lc_phase_bin_width = 0.0025
@@ -125,10 +160,9 @@ save_full_chains = False
 thin_n = 5
 thin_burnin = None
 
-nlink = 100000
-# nlink = 0  # Remake '_combined' outputs
+nlink = int(os.environ.get("TOI4137_NLINK", "50000"))
 nburnin = None  # defaults to total combined nlink/10 if None
-ncores = 14
+ncores = int(os.environ.get("TOI4137_NCORES", "10"))
 
 # %%
 # ------------------------------------------------------------
@@ -1441,32 +1475,10 @@ if not make_smoothed_rv_plot_from_existing:
                 ax.set_ylim(trace_min - ylim_pad, trace_max + ylim_pad)
     axes1[-1].set_xlabel("Link number")
     fig1_name = output_dir / f"{planet_name}_{model_name}_trace{output_suffix}.pdf"
-    fig1.savefig(fig1_name)
+    savefig_atomic(fig1, fig1_name)
     plt.close(fig1)
 
-    plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
-    corner_samples = plot_samples
-    if corner_samples.shape[0] > corner_max_samples:
-        corner_rng = np.random.default_rng(corner_random_seed)
-        corner_idx = corner_rng.choice(corner_samples.shape[0], size=corner_max_samples, replace=False)
-        corner_samples = corner_samples[corner_idx, :]
-        print(f"corner plot: using {corner_max_samples} of {plot_samples.shape[0]} posterior samples")
-    corner_display_labels = get_plot_display_labels(plot_labels)
-    fig2 = corner.corner(
-        corner_samples,
-        labels=corner_display_labels,
-        label_kwargs={"fontsize": corner_label_fontsize},
-        plot_datapoints=corner_plot_datapoints,
-        pcolor_kwargs={"rasterized": True},
-    )
-    apply_corner_scalar_formatting(fig2, corner_display_labels, corner_label_fontsize)
-    for ax in fig2.axes:
-        for artist in list(ax.collections) + list(ax.images) + list(ax.patches):
-            if not isinstance(artist, QuadContourSet):
-                artist.set_rasterized(True)
-    fig2_name = output_dir / f"{planet_name}_{model_name}_corner{output_suffix}.pdf"
-    fig2.savefig(fig2_name, bbox_inches='tight', pad_inches=0.3)
-    plt.close(fig2)
+    gc.collect()
 
 
 # %%
@@ -1539,7 +1551,7 @@ rv_sort = np.argsort(rv_model_phase)
 # Posterior bands use the same posterior samples for the regular and smoothed plots.
 all_samples = samples_for_outputs
 nsamples_total = all_samples.shape[0]
-nsamp = min(1000, nsamples_total)
+nsamp = min(posterior_predictive_max_samples, nsamples_total)
 rng = np.random.default_rng(12345)
 sel_idx = rng.choice(nsamples_total, size=nsamp, replace=False)
 
@@ -1888,5 +1900,40 @@ fig3.text(0.5, 0.5, 'Relative radial velocity (m/s)', va='center', rotation='ver
 fig3.tight_layout(rect=[0.02, 0.02, 1, 0.98])
 smooth_output_suffix = "_smoothed" if make_smoothed_rv_plot_from_existing else ""
 fig3_name = output_dir / f"{planet_name}_{model_name}_phase_lc_rv_side_by_side{output_suffix}{smooth_output_suffix}.pdf"
-fig3.savefig(fig3_name)
+savefig_atomic(fig3, fig3_name)
 plt.close(fig3)
+del lc_models, rv_models
+if rv_models_at_data is not None:
+    del rv_models_at_data
+gc.collect()
+
+
+# Generate the high-dimensional corner plot last so it cannot block the other outputs.
+if not make_smoothed_rv_plot_from_existing:
+    plot_samples, plot_labels = filter_constant_plot_columns(plot_samples, plot_labels)
+    corner_samples = plot_samples
+    print(f"corner plot: using all {corner_samples.shape[0]} posterior samples")
+    corner_display_labels = get_plot_display_labels(plot_labels)
+    fig2 = None
+    try:
+        fig2 = corner.corner(
+            corner_samples,
+            bins=corner_bins,
+            smooth=corner_smooth,
+            labels=corner_display_labels,
+            label_kwargs={"fontsize": corner_label_fontsize},
+            plot_datapoints=corner_plot_datapoints,
+            plot_density=True,
+            plot_contours=True,
+            fill_contours=False,
+        )
+        apply_corner_scalar_formatting(fig2, corner_display_labels, corner_label_fontsize)
+        fig2_name = output_dir / f"{planet_name}_{model_name}_corner{output_suffix}.pdf"
+        savefig_single_raster_pdf_atomic(fig2, fig2_name, dpi=corner_raster_dpi)
+        print(f"corner plot: {fig2_name}")
+    except Exception as exc:
+        print(f"warning: corner plot generation failed: {exc!r}")
+    finally:
+        plt.close("all")
+        del corner_samples
+        gc.collect()
